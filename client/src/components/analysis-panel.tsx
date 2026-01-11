@@ -143,13 +143,13 @@ export function AnalysisPanel({
                   }`}
                   data-testid={`result-card-${index}`}
                 >
-                  <Collapsible open={isExpanded} onOpenChange={() => toggleCard(step.id)}>
+                  <Collapsible open={isExpanded}>
                     <CollapsibleTrigger asChild>
                       <div 
                         className="p-3 cursor-pointer hover-elevate rounded-t-md"
                         onClick={() => {
                           onSelectStep(step.id);
-                          if (!isExpanded) toggleCard(step.id);
+                          toggleCard(step.id);
                         }}
                       >
                         <div className="flex items-center justify-between gap-2">
