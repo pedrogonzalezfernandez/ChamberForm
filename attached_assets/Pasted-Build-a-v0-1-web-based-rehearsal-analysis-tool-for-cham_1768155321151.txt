@@ -1,0 +1,53 @@
+Build a v0.1 web-based rehearsal/analysis tool for chamber-music students.
+
+Core idea
+- Users upload a score in MusicXML.
+- The backend runs Python + music21 to parse the score and expose analysis workflows.
+- The frontend (React + Vite) renders the score in the browser and provides controls to:
+  1) select a section (by measure range for v0.1),
+  2) choose a music21 “workflow” from a menu,
+  3) view the results as overlays / panels,
+  4) play back rehearsal-oriented audio (simple reduction / tuning support).
+
+Rendering + audio
+- Score rendering must use Verovio in the browser.
+  - If Verovio can’t directly render the uploaded MusicXML, convert it server-side to MEI (or another Verovio-compatible format) and send that to the client.
+- Audio playback should use Tone.js (WebAudio) unless you find a clearly better integration for the requirements.
+  - v0.1 playback focus: a simple harmonic reduction using clean sine tones (for tuning) over the selected measure range, with loop + tempo controls.
+
+Minimum working flow (must be functional)
+1) Upload MusicXML.
+2) Display the score (Verovio).
+3) Show a “section selection” UI: start measure + end measure.
+4) Show a “Workflow” dropdown populated from the backend.
+5) When the user clicks “Run workflow”, call the backend and show results in an Analysis panel.
+6) Provide “Play reduction / Stop / Loop / Tempo” controls for the selected section.
+
+Backend: music21 workflow bridge (important)
+- Create a simple registry of workflows (a dictionary/map of workflow_id -> function) so more music21 processes can be added easily.
+- Implement at least these workflows in v0.1:
+  - Global key estimate
+  - Chordified harmony-by-measure (simple chord labels and pitch sets)
+  - Reduction data for playback (events per measure with chord tones as frequencies)
+- The frontend should not hardcode workflow names; it should request the available workflows from the backend and populate the dropdown.
+
+API (high level)
+- Endpoint to upload the file and return:
+  - a scoreId
+  - the data needed to render in Verovio (MEI or compatible)
+  - basic metadata (title, parts, measure count)
+- Endpoint to list workflows
+- Endpoint to run a workflow on a selected measure range
+- Endpoint to return reduction playback events for Tone.js scheduling
+
+Project quality
+- Make the app run in Replit.
+- Keep it lightweight and clean.
+- Add basic error handling for invalid files and failed workflows.
+- Provide a README explaining:
+  - how to run in Replit
+  - how to add a new workflow to the music21 registry
+  - how the client requests workflows and displays results
+
+Deliverable
+A working prototype where I can upload a chamber-music MusicXML score, see it rendered, select a measure range, choose a workflow from a menu, view results, and play a sine-tone reduction loop for rehearsal/tuning.
