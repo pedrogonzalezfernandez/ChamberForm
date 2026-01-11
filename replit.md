@@ -2,9 +2,17 @@
 
 ## Overview
 
-A web-based rehearsal and analysis tool for chamber music students. Users can upload MusicXML scores, view them rendered in the browser, select measure ranges for focused practice, run music theory analysis workflows, and play sine-tone harmonic reductions for tuning practice.
+A web-based rehearsal and analysis tool for chamber music students. Users can upload MusicXML scores, view them rendered in the browser, select measure ranges and parts for focused practice, run music theory analysis workflows in a pipeline system, and play sine-tone harmonic reductions for tuning practice.
 
 ## Recent Changes
+
+- **2026-01-11**: v0.2 Pipeline System
+  - Added pipeline-based workflow execution with step management
+  - Implemented 10 music21 workflows: score_summary, global_key_estimate, chordify_and_chords, roman_numeral_analysis, cadence_spotter, interval_map_between_parts, parallel_5ths_8ves_detector, rhythm_skeleton, motif_finder_interval_contour, reduction_outer_voices
+  - Added SelectionPanel for part and measure range selection
+  - Added PipelinePanel with step list, workflow dropdown, parameter inputs, and run controls
+  - Added workspace state management per scoreId with step result caching
+  - Selection changes reset step states to prevent stale cached results
 
 - **2026-01-11**: Initial v0.1 implementation
   - Added MusicXML file upload with music21 parsing
@@ -23,18 +31,18 @@ A web-based rehearsal and analysis tool for chamber music students. Users can up
 ## Project Architecture
 
 ### Frontend (React + Vite + TypeScript)
-- `client/src/pages/home.tsx` - Main application page with all state management
+- `client/src/pages/home.tsx` - Main application page with pipeline state management
 - `client/src/components/file-upload.tsx` - Drag-and-drop MusicXML upload
 - `client/src/components/score-viewer.tsx` - Verovio score rendering with pagination
-- `client/src/components/measure-selector.tsx` - Start/end measure inputs
-- `client/src/components/workflow-selector.tsx` - Dropdown populated from backend
-- `client/src/components/analysis-panel.tsx` - Displays workflow results
+- `client/src/components/selection-panel.tsx` - Part dropdown and measure range inputs
+- `client/src/components/pipeline-panel.tsx` - Step list, workflow selection, params UI, run controls
+- `client/src/components/analysis-panel.tsx` - Displays workflow results with dedicated renderers
 - `client/src/components/playback-controls.tsx` - Tone.js playback with loop/tempo
 
 ### Backend (Express.js + Python)
-- `server/routes.ts` - API endpoints for upload, workflows, reduction
-- `server/storage.ts` - In-memory storage for uploaded scores
-- `server/python/workflows.py` - Music21 workflow registry and CLI
+- `server/routes.ts` - API endpoints for upload, workflows, pipeline operations
+- `server/storage.ts` - In-memory storage with workspace state (scores, derived streams, step cache)
+- `server/python/workflows.py` - Music21 workflow registry with 10 workflows
 
 ### Shared
 - `shared/schema.ts` - TypeScript types and Zod validation schemas
@@ -52,13 +60,34 @@ A web-based rehearsal and analysis tool for chamber music students. Users can up
 |--------|------|-------------|
 | POST | /api/upload | Upload MusicXML, returns scoreId and MEI data |
 | GET | /api/workflows | List available analysis workflows |
-| POST | /api/workflow/run | Execute a workflow on measure range |
+| POST | /api/pipeline/runStep | Execute a workflow step in the pipeline |
+| POST | /api/pipeline/reset | Reset pipeline to original score state |
+| GET | /api/pipeline/workspace/:scoreId | Get current workspace state |
 | POST | /api/reduction | Get playback events for Tone.js |
-| GET | /api/score/:scoreId | Retrieve stored score data |
+
+## Available Workflows
+
+| ID | Name | Type | Description |
+|----|------|------|-------------|
+| score_summary | Score Summary | analysis | Basic score metadata and structure |
+| global_key_estimate | Global Key Estimate | analysis | Estimated key using Krumhansl-Schmuckler |
+| chordify_and_chords | Chordify & Chord Labels | analysis | Vertical sonorities with chord labels |
+| roman_numeral_analysis | Roman Numeral Analysis | analysis | Roman numeral labels in estimated key |
+| cadence_spotter | Cadence Spotter | analysis | Detects potential cadence points |
+| interval_map_between_parts | Interval Map Between Parts | analysis | Vertical intervals between two parts |
+| parallel_5ths_8ves_detector | Parallel 5ths/8ves Detector | analysis | Voice leading errors detection |
+| rhythm_skeleton | Rhythm Skeleton | analysis | Rhythmic pattern analysis |
+| motif_finder_interval_contour | Motif Finder (Interval Contour) | analysis | Melodic motif detection |
+| reduction_outer_voices | Outer Voices Reduction | transform | Bass/soprano reduction with playback |
 
 ## Adding New Workflows
 
 1. Edit `server/python/workflows.py`
-2. Define function: `def workflow_name(score, start, end) -> dict`
-3. Add to `WORKFLOW_REGISTRY` with id, name, description, function
+2. Define function: `def workflow_name(score, start, end, params) -> dict`
+3. Add to `WORKFLOW_REGISTRY` with id, name, description, type, params schema, function
 4. (Optional) Update `analysis-panel.tsx` for custom result rendering
+
+## Known Limitations
+
+- Transform workflows operate on the original score; chained transforms do not persist modified streams to subsequent steps (planned for v0.3)
+- Playback currently only works with reduction_outer_voices workflow

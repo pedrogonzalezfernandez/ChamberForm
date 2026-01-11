@@ -261,6 +261,9 @@ export async function registerRoutes(
         steps: workspace.steps,
         currentStreamId: workspace.currentStreamId,
         metadata: score.metadata,
+        hasOriginal: true,
+        hasCurrentStream: workspace.currentStreamId !== null,
+        cachedSteps: workspace.steps.filter(s => s.status === "completed").map(s => s.id),
       });
     } catch (error) {
       console.error("Get workspace error:", error);

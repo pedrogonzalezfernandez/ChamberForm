@@ -94,18 +94,21 @@ export function PipelinePanel({
   }, [workflows]);
 
   const renderParamInput = (step: PipelineStep, param: WorkflowParam) => {
-    const currentValue = step.params?.[param.name] ?? param.default;
+    const storedValue = step.params?.[param.name];
+    const currentValue = storedValue !== undefined ? storedValue : param.default;
 
     if (param.type === "select") {
       const options = param.name === "partA" || param.name === "partB" || param.name === "part"
         ? parts.map((p, i) => ({ value: i.toString(), label: p }))
         : param.options || [];
 
+      const selectValue = currentValue !== undefined ? currentValue.toString() : (options[0]?.value || "0");
+
       return (
         <div key={param.name} className="space-y-1.5">
           <Label className="text-xs">{param.label}</Label>
           <Select
-            value={currentValue?.toString() || "0"}
+            value={selectValue}
             onValueChange={(value) => handleParamChange(step.id, param.name, value)}
           >
             <SelectTrigger className="h-8 text-xs" data-testid={`param-${step.id}-${param.name}`}>
