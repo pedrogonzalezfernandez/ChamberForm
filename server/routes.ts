@@ -4,7 +4,8 @@ import { storage } from "./storage";
 import multer from "multer";
 import { spawn } from "child_process";
 import path from "path";
-import { workflowRequestSchema } from "@shared/schema";
+import { runStepRequestSchema, selectionSchema } from "@shared/schema";
+import { z } from "zod";
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -116,9 +117,9 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/workflow/run", async (req, res) => {
+  app.post("/api/pipeline/runStep", async (req, res) => {
     try {
-      const parsed = workflowRequestSchema.safeParse(req.body);
+      const parsed = runStepRequestSchema.safeParse(req.body);
       if (!parsed.success) {
         return res.status(400).json({
           error: "Invalid request",
@@ -126,37 +127,145 @@ export async function registerRoutes(
         });
       }
 
-      const { scoreId, workflowId, startMeasure, endMeasure } = parsed.data;
+      const { scoreId, stepId, workflowId, selection, params } = parsed.data;
 
       const score = await storage.getScore(scoreId);
       if (!score) {
         return res.status(404).json({ error: "Score not found" });
       }
 
-      const { stdout } = await runPythonWorkflow(
-        "run",
-        [
-          "--workflow",
-          workflowId,
-          "--start",
-          startMeasure.toString(),
-          "--end",
-          endMeasure.toString(),
-        ],
-        score.musicXmlData
-      );
+      let workspace = await storage.getWorkspace(scoreId);
+      if (!workspace) {
+        workspace = await storage.initWorkspace(scoreId);
+      }
 
+      const workflowArgs = [
+        "--workflow", workflowId,
+        "--start", selection.startMeasure.toString(),
+        "--end", selection.endMeasure.toString(),
+        "--part", selection.partId,
+      ];
+
+      if (params && Object.keys(params).length > 0) {
+        workflowArgs.push("--params", JSON.stringify(params));
+      }
+
+      const { stdout } = await runPythonWorkflow("run", workflowArgs, score.musicXmlData);
       const result = JSON.parse(stdout);
 
       if (result.error) {
-        return res.status(400).json({ error: result.error });
+        const errorStep = {
+          id: stepId,
+          workflowId,
+          params: params || {},
+          status: "error" as const,
+          error: result.error,
+        };
+        
+        const existingStepIndex = workspace.steps.findIndex(s => s.id === stepId);
+        if (existingStepIndex >= 0) {
+          workspace.steps[existingStepIndex] = errorStep;
+        } else {
+          workspace.steps.push(errorStep);
+        }
+        await storage.updateWorkspace(scoreId, { steps: workspace.steps });
+        
+        return res.status(400).json({ error: result.error, stepId });
       }
 
-      return res.json(result);
+      const completedStep = {
+        id: stepId,
+        workflowId,
+        params: params || {},
+        result,
+        status: "completed" as const,
+      };
+      
+      const existingStepIndex = workspace.steps.findIndex(s => s.id === stepId);
+      if (existingStepIndex >= 0) {
+        workspace.steps[existingStepIndex] = completedStep;
+      } else {
+        workspace.steps.push(completedStep);
+      }
+      
+      if (result.type === "transform" && result.data?.transformedStreamId) {
+        workspace.currentStreamId = result.data.transformedStreamId;
+      }
+      
+      await storage.updateWorkspace(scoreId, { 
+        steps: workspace.steps,
+        selection,
+        currentStreamId: workspace.currentStreamId,
+      });
+
+      return res.json({ ...result, stepId });
     } catch (error) {
-      console.error("Workflow run error:", error);
+      console.error("Pipeline step run error:", error);
       return res.status(500).json({
-        error: "Failed to run workflow",
+        error: "Failed to run workflow step",
+        details: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  app.post("/api/pipeline/reset", async (req, res) => {
+    try {
+      const { scoreId } = req.body;
+
+      if (!scoreId) {
+        return res.status(400).json({ error: "scoreId is required" });
+      }
+
+      const score = await storage.getScore(scoreId);
+      if (!score) {
+        return res.status(404).json({ error: "Score not found" });
+      }
+
+      const workspace = await storage.resetWorkspace(scoreId);
+
+      return res.json({
+        success: true,
+        workspace: {
+          scoreId: workspace?.scoreId,
+          selection: workspace?.selection,
+          steps: [],
+          currentStreamId: null,
+        },
+      });
+    } catch (error) {
+      console.error("Pipeline reset error:", error);
+      return res.status(500).json({
+        error: "Failed to reset pipeline",
+        details: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  app.get("/api/pipeline/workspace/:scoreId", async (req, res) => {
+    try {
+      const { scoreId } = req.params;
+
+      const score = await storage.getScore(scoreId);
+      if (!score) {
+        return res.status(404).json({ error: "Score not found" });
+      }
+
+      let workspace = await storage.getWorkspace(scoreId);
+      if (!workspace) {
+        workspace = await storage.initWorkspace(scoreId);
+      }
+
+      return res.json({
+        scoreId: workspace.scoreId,
+        selection: workspace.selection,
+        steps: workspace.steps,
+        currentStreamId: workspace.currentStreamId,
+        metadata: score.metadata,
+      });
+    } catch (error) {
+      console.error("Get workspace error:", error);
+      return res.status(500).json({
+        error: "Failed to get workspace",
         details: error instanceof Error ? error.message : "Unknown error",
       });
     }
@@ -164,7 +273,7 @@ export async function registerRoutes(
 
   app.post("/api/reduction", async (req, res) => {
     try {
-      const { scoreId, startMeasure, endMeasure } = req.body;
+      const { scoreId, startMeasure, endMeasure, partId } = req.body;
 
       if (!scoreId || !startMeasure || !endMeasure) {
         return res.status(400).json({
@@ -180,12 +289,10 @@ export async function registerRoutes(
       const { stdout } = await runPythonWorkflow(
         "run",
         [
-          "--workflow",
-          "reduction_data",
-          "--start",
-          startMeasure.toString(),
-          "--end",
-          endMeasure.toString(),
+          "--workflow", "reduction_outer_voices",
+          "--start", startMeasure.toString(),
+          "--end", endMeasure.toString(),
+          "--part", partId || "ALL",
         ],
         score.musicXmlData
       );
@@ -196,13 +303,15 @@ export async function registerRoutes(
         return res.status(400).json({ error: result.error });
       }
 
+      const data = result.data || {};
+
       return res.json({
         scoreId,
         startMeasure,
         endMeasure,
-        events: result.data?.events || [],
-        beatsPerMeasure: result.data?.beatsPerMeasure || 4,
-        defaultTempo: result.data?.defaultTempo || 120,
+        events: data.playbackEvents || [],
+        beatsPerMeasure: data.beatsPerMeasure || 4,
+        defaultTempo: data.defaultTempo || 120,
       });
     } catch (error) {
       console.error("Reduction error:", error);

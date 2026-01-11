@@ -2,8 +2,8 @@ import { z } from "zod";
 
 export const scoreMetadataSchema = z.object({
   scoreId: z.string(),
-  title: z.string().optional(),
-  composer: z.string().optional(),
+  title: z.string().nullable(),
+  composer: z.string().nullable(),
   parts: z.array(z.string()),
   measureCount: z.number(),
 });
@@ -18,10 +18,27 @@ export const uploadResponseSchema = z.object({
 
 export type UploadResponse = z.infer<typeof uploadResponseSchema>;
 
+export const workflowParamSchema = z.object({
+  name: z.string(),
+  type: z.enum(["string", "number", "boolean", "select"]),
+  label: z.string(),
+  description: z.string().optional(),
+  required: z.boolean().default(false),
+  default: z.any().optional(),
+  options: z.array(z.object({
+    value: z.string(),
+    label: z.string(),
+  })).optional(),
+});
+
+export type WorkflowParam = z.infer<typeof workflowParamSchema>;
+
 export const workflowSchema = z.object({
   id: z.string(),
   name: z.string(),
   description: z.string(),
+  type: z.enum(["analysis", "transform"]),
+  params: z.array(workflowParamSchema).optional(),
 });
 
 export type Workflow = z.infer<typeof workflowSchema>;
@@ -32,6 +49,14 @@ export const workflowListResponseSchema = z.object({
 
 export type WorkflowListResponse = z.infer<typeof workflowListResponseSchema>;
 
+export const selectionSchema = z.object({
+  partId: z.string().default("ALL"),
+  startMeasure: z.number().min(1),
+  endMeasure: z.number().min(1),
+});
+
+export type Selection = z.infer<typeof selectionSchema>;
+
 export const measureRangeSchema = z.object({
   startMeasure: z.number().min(1),
   endMeasure: z.number().min(1),
@@ -39,23 +64,53 @@ export const measureRangeSchema = z.object({
 
 export type MeasureRange = z.infer<typeof measureRangeSchema>;
 
-export const workflowRequestSchema = z.object({
-  scoreId: z.string(),
+export const pipelineStepSchema = z.object({
+  id: z.string(),
   workflowId: z.string(),
-  startMeasure: z.number().min(1),
-  endMeasure: z.number().min(1),
+  params: z.record(z.any()).optional(),
+  result: z.any().optional(),
+  status: z.enum(["pending", "running", "completed", "error"]).default("pending"),
+  error: z.string().optional(),
 });
 
-export type WorkflowRequest = z.infer<typeof workflowRequestSchema>;
+export type PipelineStep = z.infer<typeof pipelineStepSchema>;
 
-export const analysisResultSchema = z.object({
+export const pipelineStateSchema = z.object({
+  scoreId: z.string(),
+  selection: selectionSchema,
+  steps: z.array(pipelineStepSchema),
+  currentStreamId: z.string().nullable(),
+});
+
+export type PipelineState = z.infer<typeof pipelineStateSchema>;
+
+export const runStepRequestSchema = z.object({
+  scoreId: z.string(),
+  stepId: z.string(),
+  workflowId: z.string(),
+  selection: selectionSchema,
+  params: z.record(z.any()).optional(),
+});
+
+export type RunStepRequest = z.infer<typeof runStepRequestSchema>;
+
+export const workflowResultSchema = z.object({
   workflowId: z.string(),
   workflowName: z.string(),
-  measureRange: measureRangeSchema,
+  type: z.enum(["analysis", "transform"]),
+  selection: selectionSchema,
   data: z.record(z.any()),
+  playbackEvents: z.array(z.object({
+    measure: z.number(),
+    beat: z.number(),
+    duration: z.number(),
+    frequencies: z.array(z.number()),
+    chordLabel: z.string().optional(),
+  })).optional(),
+  transformedStreamId: z.string().optional(),
 });
 
-export type AnalysisResult = z.infer<typeof analysisResultSchema>;
+export type WorkflowResult = z.infer<typeof workflowResultSchema>;
 
 export const playbackEventSchema = z.object({
   measure: z.number(),
@@ -84,3 +139,12 @@ export const errorResponseSchema = z.object({
 });
 
 export type ErrorResponse = z.infer<typeof errorResponseSchema>;
+
+export const analysisResultSchema = z.object({
+  workflowId: z.string(),
+  workflowName: z.string(),
+  measureRange: measureRangeSchema,
+  data: z.record(z.any()),
+});
+
+export type AnalysisResult = z.infer<typeof analysisResultSchema>;
