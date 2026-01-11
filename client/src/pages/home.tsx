@@ -10,7 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Music, Upload } from "lucide-react";
+import { Upload } from "lucide-react";
 import type { 
   UploadResponse, 
   Workflow, 
@@ -479,7 +479,6 @@ export default function Home() {
     <div className="min-h-screen bg-background">
       <header className="h-14 border-b flex items-center justify-between px-6 lg:px-8 bg-card">
         <div className="flex items-center gap-3">
-          <Music className="h-5 w-5 text-primary" />
           <h1 className="text-lg font-semibold tracking-tight">Chamber Music Rehearsal Tool</h1>
         </div>
         {scoreData && (
