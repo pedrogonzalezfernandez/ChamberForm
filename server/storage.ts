@@ -1,37 +1,51 @@
-import { type User, type InsertUser } from "@shared/schema";
 import { randomUUID } from "crypto";
+import type { ScoreMetadata } from "@shared/schema";
 
-// modify the interface with any CRUD methods
-// you might need
+export interface StoredScore {
+  id: string;
+  originalFilename: string;
+  musicXmlData: string;
+  meiData: string;
+  metadata: ScoreMetadata;
+}
 
 export interface IStorage {
-  getUser(id: string): Promise<User | undefined>;
-  getUserByUsername(username: string): Promise<User | undefined>;
-  createUser(user: InsertUser): Promise<User>;
+  saveScore(filename: string, musicXmlData: string, meiData: string, metadata: Omit<ScoreMetadata, "scoreId">): Promise<StoredScore>;
+  getScore(id: string): Promise<StoredScore | undefined>;
+  deleteScore(id: string): Promise<boolean>;
 }
 
 export class MemStorage implements IStorage {
-  private users: Map<string, User>;
+  private scores: Map<string, StoredScore>;
 
   constructor() {
-    this.users = new Map();
+    this.scores = new Map();
   }
 
-  async getUser(id: string): Promise<User | undefined> {
-    return this.users.get(id);
-  }
-
-  async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.username === username,
-    );
-  }
-
-  async createUser(insertUser: InsertUser): Promise<User> {
+  async saveScore(
+    filename: string,
+    musicXmlData: string,
+    meiData: string,
+    metadata: Omit<ScoreMetadata, "scoreId">
+  ): Promise<StoredScore> {
     const id = randomUUID();
-    const user: User = { ...insertUser, id };
-    this.users.set(id, user);
-    return user;
+    const score: StoredScore = {
+      id,
+      originalFilename: filename,
+      musicXmlData,
+      meiData,
+      metadata: { ...metadata, scoreId: id },
+    };
+    this.scores.set(id, score);
+    return score;
+  }
+
+  async getScore(id: string): Promise<StoredScore | undefined> {
+    return this.scores.get(id);
+  }
+
+  async deleteScore(id: string): Promise<boolean> {
+    return this.scores.delete(id);
   }
 }
 
