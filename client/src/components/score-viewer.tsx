@@ -1,8 +1,20 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
+import createVerovioModule from "verovio/wasm";
+import { VerovioToolkit } from "verovio/esm";
 
 interface ScoreViewerProps {
   meiData: string;
+}
+
+let verovioModulePromise: Promise<any> | null = null;
+
+async function getVerovioToolkit() {
+  if (!verovioModulePromise) {
+    verovioModulePromise = createVerovioModule();
+  }
+  const VerovioModule = await verovioModulePromise;
+  return new VerovioToolkit(VerovioModule);
 }
 
 export function ScoreViewer({ meiData }: ScoreViewerProps) {
@@ -11,7 +23,7 @@ export function ScoreViewer({ meiData }: ScoreViewerProps) {
   const [error, setError] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
-  const verovioRef = useRef<any>(null);
+  const verovioRef = useRef<VerovioToolkit | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -21,12 +33,10 @@ export function ScoreViewer({ meiData }: ScoreViewerProps) {
         setIsLoading(true);
         setError(null);
 
-        const verovio = await import("verovio");
-        const VerovioToolkit = verovio.default || verovio;
+        const vrvToolkit = await getVerovioToolkit();
         
         if (!isMounted) return;
 
-        const vrvToolkit = new VerovioToolkit();
         verovioRef.current = vrvToolkit;
         
         const containerWidth = containerRef.current?.clientWidth || 800;
@@ -43,7 +53,11 @@ export function ScoreViewer({ meiData }: ScoreViewerProps) {
           svgViewBox: true,
         });
 
-        vrvToolkit.loadData(meiData);
+        const loadSuccess = vrvToolkit.loadData(meiData);
+        
+        if (!loadSuccess) {
+          throw new Error("Verovio could not parse the score data");
+        }
         
         const pageCount = vrvToolkit.getPageCount();
         setTotalPages(pageCount);
@@ -67,7 +81,7 @@ export function ScoreViewer({ meiData }: ScoreViewerProps) {
     };
   }, [meiData]);
 
-  const renderPage = (vrvToolkit: any, page: number) => {
+  const renderPage = (vrvToolkit: VerovioToolkit, page: number) => {
     if (!containerRef.current) return;
     
     const svg = vrvToolkit.renderToSVG(page);
