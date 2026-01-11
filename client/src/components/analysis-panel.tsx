@@ -2,16 +2,82 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { FileText, Music, Key, BarChart3, Hash, AlertTriangle, Waves } from "lucide-react";
-import type { WorkflowResult } from "@shared/schema";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { 
+  FileText, 
+  Music, 
+  Key, 
+  BarChart3, 
+  Hash, 
+  AlertTriangle, 
+  Waves,
+  ChevronDown,
+  ChevronRight,
+  Download,
+  Play,
+  Eye,
+  CheckCircle2,
+  Clock,
+  List,
+  Layers,
+  SkipForward,
+  Zap,
+  RotateCcw
+} from "lucide-react";
+import type { WorkflowResult, PipelineStep, Workflow } from "@shared/schema";
+import { useState } from "react";
+import { ChordStepper } from "./chord-stepper";
 
 interface AnalysisPanelProps {
-  result: WorkflowResult | null;
+  steps: PipelineStep[];
+  workflows: Workflow[];
+  selectedStepId: string | null;
+  activeStreamId: string | null;
+  onSelectStep: (stepId: string) => void;
+  onExport?: (stepId: string, format: "musicxml" | "midi") => void;
+  onPlayStep?: (stepId: string) => void;
+  onActivateStream?: (streamId: string | null) => void;
   isLoading: boolean;
 }
 
-export function AnalysisPanel({ result, isLoading }: AnalysisPanelProps) {
+export function AnalysisPanel({ 
+  steps, 
+  workflows, 
+  selectedStepId,
+  activeStreamId,
+  onSelectStep,
+  onExport,
+  onPlayStep,
+  onActivateStream,
+  isLoading 
+}: AnalysisPanelProps) {
+  const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set());
+
+  const completedSteps = steps.filter(s => s.status === "completed" && s.result);
+
+  const toggleCard = (stepId: string) => {
+    setExpandedCards(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(stepId)) {
+        newSet.delete(stepId);
+      } else {
+        newSet.add(stepId);
+      }
+      return newSet;
+    });
+  };
+
+  const getWorkflowById = (id: string) => workflows.find(w => w.id === id);
+
+  const formatTimestamp = (ts?: number) => {
+    if (!ts) return "";
+    const date = new Date(ts);
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
   if (isLoading) {
     return (
       <Card>
@@ -27,7 +93,7 @@ export function AnalysisPanel({ result, isLoading }: AnalysisPanelProps) {
     );
   }
 
-  if (!result) {
+  if (completedSteps.length === 0) {
     return (
       <Card>
         <CardHeader className="pb-4">
@@ -47,32 +113,187 @@ export function AnalysisPanel({ result, isLoading }: AnalysisPanelProps) {
 
   return (
     <Card>
-      <CardHeader className="pb-4">
-        <div className="flex items-center justify-between gap-4 flex-wrap">
-          <CardTitle className="text-lg font-medium">Results</CardTitle>
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
           <div className="flex items-center gap-2">
-            <Badge variant="secondary" className="font-normal">
-              {result.workflowName}
-            </Badge>
-            {result.type === "transform" && (
-              <Badge variant="outline" className="font-normal">
-                Transform
-              </Badge>
-            )}
+            <Layers className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-lg font-medium">Results</CardTitle>
           </div>
+          <Badge variant="secondary" className="text-xs">
+            {completedSteps.length} step{completedSteps.length !== 1 ? 's' : ''}
+          </Badge>
         </div>
-        {result.selection && (
-          <p className="text-xs text-muted-foreground mt-1">
-            {result.selection.partId === "ALL" ? "All parts" : `Part ${result.selection.partId}`}
-            {" • "}
-            Measures {result.selection.startMeasure} – {result.selection.endMeasure}
-          </p>
-        )}
       </CardHeader>
-      <CardContent>
-        <ScrollArea className="max-h-96">
-          <div className="space-y-4" data-testid="analysis-results">
-            {renderResultData(result.workflowId, result.data)}
+      <CardContent className="p-0">
+        <ScrollArea className="max-h-[500px]">
+          <div className="space-y-2 p-4 pt-0">
+            {completedSteps.map((step, index) => {
+              const result = step.result as WorkflowResult;
+              const workflow = getWorkflowById(step.workflowId);
+              const isExpanded = expandedCards.has(step.id);
+              const isSelected = selectedStepId === step.id;
+              const hasExports = result?.exports?.formats && result.exports.formats.length > 0;
+              const hasPlayback = result?.playbackEvents && result.playbackEvents.length > 0;
+
+              return (
+                <div
+                  key={step.id}
+                  className={`rounded-md border transition-colors ${
+                    isSelected ? "border-primary bg-primary/5" : ""
+                  }`}
+                  data-testid={`result-card-${index}`}
+                >
+                  <Collapsible open={isExpanded} onOpenChange={() => toggleCard(step.id)}>
+                    <CollapsibleTrigger asChild>
+                      <div 
+                        className="p-3 cursor-pointer hover-elevate rounded-t-md"
+                        onClick={() => {
+                          onSelectStep(step.id);
+                          if (!isExpanded) toggleCard(step.id);
+                        }}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 min-w-0 flex-1">
+                            {isExpanded ? (
+                              <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
+                            ) : (
+                              <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+                            )}
+                            <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
+                            <span className="text-sm font-medium truncate">
+                              {result?.workflowName || workflow?.name || step.workflowId}
+                            </span>
+                            {workflow?.type === "transform" && (
+                              <Badge variant="outline" className="text-xs shrink-0">Transform</Badge>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            {result?.timestamp && (
+                              <span className="text-xs text-muted-foreground flex items-center gap-1">
+                                <Clock className="h-3 w-3" />
+                                {formatTimestamp(result.timestamp)}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        {result?.selection && (
+                          <p className="text-xs text-muted-foreground mt-1 ml-6">
+                            {result.selection.partId === "ALL" ? "All parts" : `Part ${result.selection.partId}`}
+                            {" • "}
+                            Measures {result.selection.startMeasure} – {result.selection.endMeasure}
+                          </p>
+                        )}
+                      </div>
+                    </CollapsibleTrigger>
+                    
+                    <CollapsibleContent>
+                      <div className="border-t">
+                        {workflow?.type === "transform" && result?.data?.transformedStreamId && (
+                          <div className="px-3 py-2 bg-muted/30 flex items-center justify-between gap-2 flex-wrap">
+                            <span className="text-xs text-muted-foreground">
+                              Transform result available
+                            </span>
+                            {activeStreamId === result.data.transformedStreamId ? (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => onActivateStream?.(null)}
+                                className="gap-1.5"
+                                data-testid={`deactivate-stream-${index}`}
+                              >
+                                <RotateCcw className="h-3 w-3" />
+                                Show Original
+                              </Button>
+                            ) : (
+                              <Button
+                                size="sm"
+                                variant="default"
+                                onClick={() => onActivateStream?.(result.data.transformedStreamId)}
+                                className="gap-1.5"
+                                data-testid={`activate-stream-${index}`}
+                              >
+                                <Zap className="h-3 w-3" />
+                                Activate in Score
+                              </Button>
+                            )}
+                          </div>
+                        )}
+                        <Tabs defaultValue="list" className="w-full">
+                          <div className="px-3 pt-2">
+                            <TabsList className="h-8">
+                              <TabsTrigger value="list" className="text-xs gap-1">
+                                <List className="h-3 w-3" />
+                                List
+                              </TabsTrigger>
+                              {hasPlayback && (
+                                <TabsTrigger value="playback" className="text-xs gap-1">
+                                  <SkipForward className="h-3 w-3" />
+                                  Stepper
+                                </TabsTrigger>
+                              )}
+                              {hasExports && (
+                                <TabsTrigger value="export" className="text-xs gap-1">
+                                  <Download className="h-3 w-3" />
+                                  Export
+                                </TabsTrigger>
+                              )}
+                            </TabsList>
+                          </div>
+                          
+                          <TabsContent value="list" className="px-3 pb-3 mt-0">
+                            <div className="space-y-4 pt-3" data-testid={`result-data-${index}`}>
+                              {renderResultData(result?.workflowId || step.workflowId, result?.data || {})}
+                            </div>
+                          </TabsContent>
+                          
+                          {hasPlayback && (
+                            <TabsContent value="playback" className="px-3 pb-3 mt-0">
+                              <div className="pt-3">
+                                <ChordStepper 
+                                  events={result.playbackEvents || []} 
+                                  tempo={result.data?.defaultTempo || 120}
+                                />
+                              </div>
+                            </TabsContent>
+                          )}
+                          
+                          {hasExports && (
+                            <TabsContent value="export" className="px-3 pb-3 mt-0">
+                              <div className="pt-3 flex flex-wrap gap-2">
+                                {result.exports?.formats.includes("musicxml") && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => onExport?.(step.id, "musicxml")}
+                                    className="gap-2"
+                                    data-testid={`export-musicxml-${index}`}
+                                  >
+                                    <Download className="h-3 w-3" />
+                                    MusicXML
+                                  </Button>
+                                )}
+                                {result.exports?.formats.includes("midi") && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => onExport?.(step.id, "midi")}
+                                    className="gap-2"
+                                    data-testid={`export-midi-${index}`}
+                                  >
+                                    <Download className="h-3 w-3" />
+                                    MIDI
+                                  </Button>
+                                )}
+                              </div>
+                            </TabsContent>
+                          )}
+                        </Tabs>
+                      </div>
+                    </CollapsibleContent>
+                  </Collapsible>
+                </div>
+              );
+            })}
           </div>
         </ScrollArea>
       </CardContent>
@@ -277,7 +498,7 @@ function IntervalMapResult({ data }: { data: any }) {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <span className="text-sm font-medium">{data.partA} ↔ {data.partB}</span>
+        <span className="text-sm font-medium">{data.partA} - {data.partB}</span>
         <Badge variant="secondary" className="text-xs">
           {data.totalIntervals} intervals
         </Badge>
@@ -320,7 +541,7 @@ function ParallelsResult({ data }: { data: any }) {
                 <span className="text-xs text-muted-foreground">m.{p.measure}</span>
               </div>
               <p className="font-mono text-xs mt-1">
-                {p.pitchA1}/{p.pitchB1} → {p.pitchA2}/{p.pitchB2}
+                {p.pitchA1}/{p.pitchB1} - {p.pitchA2}/{p.pitchB2}
               </p>
             </div>
           ))}

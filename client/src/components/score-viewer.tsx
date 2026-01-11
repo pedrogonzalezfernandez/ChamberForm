@@ -1,10 +1,18 @@
-import { useEffect, useRef, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { useEffect, useRef, useState, useCallback } from "react";
+import { Loader2, Eye, EyeOff, Tag } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import createVerovioModule from "verovio/wasm";
 import { VerovioToolkit } from "verovio/esm";
+import type { Annotation } from "@shared/schema";
 
 interface ScoreViewerProps {
   meiData: string;
+  annotations?: Annotation[];
+  showAnnotations?: boolean;
+  onAnnotationToggle?: (show: boolean) => void;
 }
 
 let verovioModulePromise: Promise<any> | null = null;
@@ -17,13 +25,23 @@ async function getVerovioToolkit() {
   return new VerovioToolkit(VerovioModule);
 }
 
-export function ScoreViewer({ meiData }: ScoreViewerProps) {
+export function ScoreViewer({ 
+  meiData, 
+  annotations = [], 
+  showAnnotations = false,
+  onAnnotationToggle 
+}: ScoreViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [annotationsVisible, setAnnotationsVisible] = useState(showAnnotations);
   const verovioRef = useRef<VerovioToolkit | null>(null);
+
+  useEffect(() => {
+    setAnnotationsVisible(showAnnotations);
+  }, [showAnnotations]);
 
   useEffect(() => {
     let isMounted = true;
@@ -102,6 +120,19 @@ export function ScoreViewer({ meiData }: ScoreViewerProps) {
     }
   };
 
+  const handleAnnotationToggle = useCallback((checked: boolean) => {
+    setAnnotationsVisible(checked);
+    onAnnotationToggle?.(checked);
+  }, [onAnnotationToggle]);
+
+  const groupedAnnotations = annotations.reduce((acc, ann) => {
+    if (!acc[ann.measure]) {
+      acc[ann.measure] = [];
+    }
+    acc[ann.measure].push(ann);
+    return acc;
+  }, {} as Record<number, Annotation[]>);
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64 bg-white dark:bg-card">
@@ -128,11 +159,56 @@ export function ScoreViewer({ meiData }: ScoreViewerProps) {
 
   return (
     <div className="bg-white dark:bg-card">
+      {annotations.length > 0 && (
+        <div className="flex items-center justify-between px-4 py-2 border-b bg-muted/20">
+          <div className="flex items-center gap-2">
+            <Tag className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm text-muted-foreground">
+              {annotations.length} annotation{annotations.length !== 1 ? 's' : ''}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Label htmlFor="show-annotations" className="text-sm text-muted-foreground">
+              Show annotations
+            </Label>
+            <Switch
+              id="show-annotations"
+              checked={annotationsVisible}
+              onCheckedChange={handleAnnotationToggle}
+              data-testid="toggle-annotations"
+            />
+          </div>
+        </div>
+      )}
+      
       <div 
         ref={containerRef} 
         className="p-6 overflow-auto max-h-[600px]"
         data-testid="score-display"
       />
+      
+      {annotationsVisible && annotations.length > 0 && (
+        <div className="border-t px-4 py-3 bg-muted/10 max-h-48 overflow-auto">
+          <div className="flex flex-wrap gap-2">
+            {Object.entries(groupedAnnotations).map(([measure, anns]) => (
+              <div key={measure} className="flex items-center gap-1.5 p-2 rounded bg-background border">
+                <span className="text-xs text-muted-foreground font-mono">m.{measure}</span>
+                <div className="flex flex-wrap gap-1">
+                  {anns.map((ann, i) => (
+                    <Badge 
+                      key={i} 
+                      variant={ann.type === "marker" ? "destructive" : "secondary"}
+                      className="text-xs font-mono"
+                    >
+                      {ann.text}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       
       {totalPages > 1 && (
         <div className="flex items-center justify-center gap-4 py-4 border-t bg-muted/30">

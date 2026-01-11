@@ -183,6 +183,8 @@ def workflow_chordify_and_chords(score, selection: dict, params: dict) -> dict:
         chordified = excerpt
     
     measures_data = []
+    playback_events = []
+    annotations = []
     start_m = selection.get("startMeasure", 1)
     end_m = selection.get("endMeasure", start_m + 10)
     
@@ -196,11 +198,14 @@ def workflow_chordify_and_chords(score, selection: dict, params: dict) -> dict:
             
             for element in measure.recurse().getElementsByClass('Chord'):
                 pitches = []
+                midi_notes = []
                 for p in element.pitches:
                     pitches.append({
                         "name": str(p.nameWithOctave),
                         "midi": p.midi if hasattr(p, 'midi') else None,
                     })
+                    if hasattr(p, 'midi'):
+                        midi_notes.append(p.midi)
                 
                 chord_label = ""
                 try:
@@ -212,11 +217,34 @@ def workflow_chordify_and_chords(score, selection: dict, params: dict) -> dict:
                         chord_label = "-".join([p["name"] for p in pitches[:3]]) if pitches else "?"
                 
                 beat = float(element.beat) if hasattr(element, 'beat') and element.beat else 1.0
+                offset_ql = float(element.offset) if hasattr(element, 'offset') else 0.0
+                duration = float(element.quarterLength) if element.quarterLength else 1.0
                 
                 measure_chords.append({
                     "beat": beat,
                     "label": chord_label,
                     "pitches": pitches,
+                    "offsetQL": offset_ql,
+                })
+                
+                frequencies = [440.0 * (2 ** ((m - 69) / 12)) for m in midi_notes]
+                playback_events.append({
+                    "measure": measure_num,
+                    "beat": beat,
+                    "duration": duration,
+                    "frequencies": [round(f, 2) for f in frequencies],
+                    "midiNotes": midi_notes,
+                    "chordLabel": chord_label,
+                    "offsetQL": offset_ql,
+                })
+                
+                annotations.append({
+                    "type": "text",
+                    "measure": measure_num,
+                    "offsetQL": offset_ql,
+                    "part": "ALL",
+                    "text": chord_label,
+                    "style": {"category": "chord"}
                 })
             
             if measure_chords:
@@ -231,6 +259,9 @@ def workflow_chordify_and_chords(score, selection: dict, params: dict) -> dict:
     return {
         "measures": measures_data,
         "totalChords": sum(len(m["chords"]) for m in measures_data),
+        "playbackEvents": playback_events,
+        "annotations": annotations,
+        "exports": {"formats": ["musicxml", "midi"]},
     }
 
 
@@ -251,6 +282,8 @@ def workflow_roman_numeral_analysis(score, selection: dict, params: dict) -> dic
         return {"error": "Could not chordify the selection", "measures": []}
     
     measures_data = []
+    playback_events = []
+    annotations = []
     start_m = selection.get("startMeasure", 1)
     end_m = selection.get("endMeasure", start_m + 10)
     
@@ -266,11 +299,36 @@ def workflow_roman_numeral_analysis(score, selection: dict, params: dict) -> dic
                 try:
                     rn = roman.romanNumeralFromChord(chord, estimated_key)
                     beat = float(chord.beat) if hasattr(chord, 'beat') and chord.beat else 1.0
+                    offset_ql = float(chord.offset) if hasattr(chord, 'offset') else 0.0
+                    duration = float(chord.quarterLength) if chord.quarterLength else 1.0
                     
+                    numeral_str = str(rn.figure)
                     measure_numerals.append({
                         "beat": beat,
-                        "numeral": str(rn.figure),
+                        "numeral": numeral_str,
                         "quality": rn.impliedQuality if hasattr(rn, 'impliedQuality') else None,
+                        "offsetQL": offset_ql,
+                    })
+                    
+                    midi_notes = [p.midi for p in chord.pitches if hasattr(p, 'midi')]
+                    frequencies = [440.0 * (2 ** ((m - 69) / 12)) for m in midi_notes]
+                    playback_events.append({
+                        "measure": measure_num,
+                        "beat": beat,
+                        "duration": duration,
+                        "frequencies": [round(f, 2) for f in frequencies],
+                        "midiNotes": midi_notes,
+                        "chordLabel": numeral_str,
+                        "offsetQL": offset_ql,
+                    })
+                    
+                    annotations.append({
+                        "type": "text",
+                        "measure": measure_num,
+                        "offsetQL": offset_ql,
+                        "part": "ALL",
+                        "text": numeral_str,
+                        "style": {"category": "roman"}
                     })
                 except Exception:
                     continue
@@ -287,6 +345,8 @@ def workflow_roman_numeral_analysis(score, selection: dict, params: dict) -> dic
     return {
         "key": str(estimated_key),
         "measures": measures_data,
+        "playbackEvents": playback_events,
+        "annotations": annotations,
     }
 
 
@@ -356,10 +416,22 @@ def workflow_cadence_spotter(score, selection: dict, params: dict) -> dict:
         except Exception:
             continue
     
+    annotations = []
+    for cad in cadences:
+        annotations.append({
+            "type": "marker",
+            "measure": cad["measure"],
+            "offsetQL": 0.0,
+            "part": "ALL",
+            "text": cad["type"].split("(")[0].strip(),
+            "style": {"category": "cadence"}
+        })
+    
     return {
         "key": str(estimated_key),
         "cadences": cadences,
         "totalFound": len(cadences),
+        "annotations": annotations,
     }
 
 
@@ -750,7 +822,8 @@ def workflow_reduction_outer_voices(score, selection: dict, params: dict) -> dic
         "playbackEvents": playback_events,
         "beatsPerMeasure": beats_per_measure,
         "defaultTempo": 120,
-        "description": "Outer voices reduction (highest + lowest pitches at each chord change)"
+        "description": "Outer voices reduction (highest + lowest pitches at each chord change)",
+        "exports": {"formats": ["musicxml", "midi"]},
     }
 
 
@@ -941,11 +1014,55 @@ def get_score_metadata(score) -> dict:
     return metadata
 
 
+def export_score(score, selection: dict, format: str) -> dict:
+    """Export score to MusicXML or MIDI format."""
+    import io
+    from music21 import midi
+    
+    excerpt = get_selection(score, selection)
+    
+    try:
+        if format == "midi":
+            mf = midi.translate.music21ObjectToMidiFile(excerpt)
+            buf = io.BytesIO()
+            mf.open(buf, 'wb')
+            mf.write()
+            mf.close()
+            buf.seek(0)
+            data = base64.b64encode(buf.read()).decode('utf-8')
+            return {
+                "success": True,
+                "format": "midi",
+                "data": data,
+                "contentType": "audio/midi",
+                "filename": "export.mid"
+            }
+        elif format == "musicxml":
+            from music21 import converter
+            xml_data = converter.toData(excerpt, fmt='musicxml')
+            if isinstance(xml_data, bytes):
+                xml_str = xml_data.decode('utf-8')
+            else:
+                xml_str = str(xml_data)
+            data = base64.b64encode(xml_str.encode('utf-8')).decode('utf-8')
+            return {
+                "success": True,
+                "format": "musicxml",
+                "data": data,
+                "contentType": "application/vnd.recordare.musicxml+xml",
+                "filename": "export.musicxml"
+            }
+        else:
+            return {"success": False, "error": f"Unknown format: {format}"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description="Music21 Workflow CLI")
-    parser.add_argument("command", choices=["list", "run", "parse", "convert"])
+    parser.add_argument("command", choices=["list", "run", "parse", "convert", "export"])
     parser.add_argument("--workflow", help="Workflow ID for run command")
     parser.add_argument("--file", help="Path to MusicXML file")
     parser.add_argument("--start", type=int, default=1, help="Start measure")
@@ -1026,3 +1143,33 @@ if __name__ == "__main__":
             print(json.dumps(result))
         except Exception as e:
             print(json.dumps({"error": str(e)}))
+    
+    elif args.command == "export":
+        if args.file:
+            with open(args.file, 'r') as f:
+                musicxml_data = f.read()
+        else:
+            musicxml_data = sys.stdin.read()
+        
+        try:
+            score = parse_musicxml(musicxml_data)
+            metadata = get_score_metadata(score)
+            
+            end_measure = args.end if args.end else metadata["measureCount"]
+            
+            selection = {
+                "partId": args.part,
+                "startMeasure": args.start,
+                "endMeasure": end_measure
+            }
+            
+            try:
+                params = json.loads(args.params)
+            except Exception:
+                params = {}
+            
+            format_type = params.get("format", "musicxml")
+            result = export_score(score, selection, format_type)
+            print(json.dumps(result))
+        except Exception as e:
+            print(json.dumps({"success": False, "error": str(e)}))

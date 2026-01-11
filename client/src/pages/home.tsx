@@ -18,6 +18,7 @@ import type {
   ReductionData, 
   Selection,
   PipelineStep,
+  Annotation,
 } from "@shared/schema";
 
 let stepIdCounter = 0;
@@ -38,6 +39,8 @@ export default function Home() {
   const [currentResult, setCurrentResult] = useState<WorkflowResult | null>(null);
   const [reductionData, setReductionData] = useState<ReductionData | null>(null);
   const [isRunningPipeline, setIsRunningPipeline] = useState(false);
+  const [showAnnotations, setShowAnnotations] = useState(false);
+  const [activeStreamId, setActiveStreamId] = useState<string | null>(null);
   const abortRef = useRef(false);
 
   const { data: workflows, isLoading: workflowsLoading } = useQuery<{ workflows: Workflow[] }>({
@@ -70,6 +73,7 @@ export default function Home() {
       setCurrentResult(null);
       setReductionData(null);
       setSelectedStepId(null);
+      setActiveStreamId(null);
       toast({
         title: "Score uploaded",
         description: `${data.metadata.title || "Untitled"} loaded with ${data.metadata.measureCount} measures`,
@@ -323,6 +327,7 @@ export default function Home() {
     setReductionData(null);
     setSelectedStepId(null);
     setIsRunningPipeline(false);
+    setActiveStreamId(null);
     
     if (scoreData) {
       setSelection({ 
@@ -335,6 +340,12 @@ export default function Home() {
         await apiRequest("POST", "/api/pipeline/reset", {
           scoreId: scoreData.scoreId,
         });
+        
+        const response = await fetch(`/api/score/${scoreData.scoreId}`);
+        if (response.ok) {
+          const data = await response.json();
+          setScoreData(prev => prev ? { ...prev, meiData: data.meiData } : prev);
+        }
       } catch (error) {
         console.error("Reset error:", error);
       }
@@ -366,9 +377,103 @@ export default function Home() {
     }
   }, [pipelineSteps, scoreData, selection]);
 
+  const handleExport = useCallback(async (stepId: string, format: "musicxml" | "midi") => {
+    if (!scoreData) return;
+    
+    const step = pipelineSteps.find(s => s.id === stepId);
+    if (!step?.result) return;
+    
+    const result = step.result as WorkflowResult;
+    
+    try {
+      const response = await fetch("/api/pipeline/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          scoreId: scoreData.scoreId,
+          stepId,
+          format,
+          selection: result.selection,
+        }),
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Export failed");
+      }
+      
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = format === "midi" ? "export.mid" : "export.musicxml";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      toast({
+        title: "Export complete",
+        description: `Downloaded ${format.toUpperCase()} file`,
+      });
+    } catch (error) {
+      toast({
+        title: "Export failed",
+        description: error instanceof Error ? error.message : "Unknown error",
+        variant: "destructive",
+      });
+    }
+  }, [pipelineSteps, scoreData, toast]);
+
+  const handlePlayStep = useCallback((stepId: string) => {
+    const step = pipelineSteps.find(s => s.id === stepId);
+    if (step?.result) {
+      const result = step.result as WorkflowResult;
+      if (result.playbackEvents && result.playbackEvents.length > 0) {
+        setReductionData({
+          scoreId: scoreData?.scoreId || "",
+          startMeasure: selection.startMeasure,
+          endMeasure: selection.endMeasure,
+          events: result.playbackEvents,
+          beatsPerMeasure: result.data?.beatsPerMeasure || 4,
+          defaultTempo: result.data?.defaultTempo || 120,
+        });
+      }
+    }
+  }, [pipelineSteps, scoreData, selection]);
+
   const handlePreparePlayback = useCallback(() => {
     getReductionMutation.mutate();
   }, [getReductionMutation]);
+
+  const handleActivateStream = useCallback(async (streamId: string | null) => {
+    if (!scoreData) return;
+    
+    try {
+      const response = await apiRequest("POST", "/api/pipeline/activateStream", {
+        scoreId: scoreData.scoreId,
+        streamId: streamId || "original",
+      });
+      
+      const data = await response.json();
+      
+      if (data.success && data.meiData) {
+        setScoreData(prev => prev ? { ...prev, meiData: data.meiData } : prev);
+        setActiveStreamId(streamId);
+        
+        toast({
+          title: streamId ? "View switched" : "Restored original",
+          description: streamId ? "Showing transformed score" : "Showing original score",
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "Failed to switch view",
+        description: error instanceof Error ? error.message : "Unknown error",
+        variant: "destructive",
+      });
+    }
+  }, [scoreData, toast]);
 
   return (
     <div className="min-h-screen bg-background">
@@ -423,12 +528,24 @@ export default function Home() {
                   </div>
                 </CardHeader>
                 <CardContent className="p-0">
-                  <ScoreViewer meiData={scoreData.meiData} />
+                  <ScoreViewer 
+                    meiData={scoreData.meiData} 
+                    annotations={currentResult?.annotations || []}
+                    showAnnotations={showAnnotations}
+                    onAnnotationToggle={setShowAnnotations}
+                  />
                 </CardContent>
               </Card>
 
               <AnalysisPanel
-                result={currentResult}
+                steps={pipelineSteps}
+                workflows={workflows?.workflows || []}
+                selectedStepId={selectedStepId}
+                activeStreamId={activeStreamId}
+                onSelectStep={handleSelectStep}
+                onExport={handleExport}
+                onPlayStep={handlePlayStep}
+                onActivateStream={handleActivateStream}
                 isLoading={runStepMutation.isPending}
               />
             </div>

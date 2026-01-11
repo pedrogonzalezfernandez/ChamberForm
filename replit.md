@@ -6,6 +6,14 @@ A web-based rehearsal and analysis tool for chamber music students. Users can up
 
 ## Recent Changes
 
+- **2026-01-11**: v0.3 Enhanced UI/UX
+  - Added ChordStepper component with Prev/Play/Next/Play All controls, volume slider, and scrubber for stepping through chord events
+  - Added score annotation overlay system with toggle controls and measure-grouped display
+  - Added Activate derived stream feature to switch between original and transformed scores
+  - Extended WorkflowResult schema with annotations, exports, and timestamp fields
+  - Refactored AnalysisPanel with collapsible step cards and tabbed views (List/Stepper/Export)
+  - Integrated Tone.js polyphonic playback in ChordStepper with proper cleanup on unmount
+
 - **2026-01-11**: v0.2 Pipeline System
   - Added pipeline-based workflow execution with step management
   - Implemented 10 music21 workflows: score_summary, global_key_estimate, chordify_and_chords, roman_numeral_analysis, cadence_spotter, interval_map_between_parts, parallel_5ths_8ves_detector, rhythm_skeleton, motif_finder_interval_contour, reduction_outer_voices
@@ -38,6 +46,7 @@ A web-based rehearsal and analysis tool for chamber music students. Users can up
 - `client/src/components/pipeline-panel.tsx` - Step list, workflow selection, params UI, run controls
 - `client/src/components/analysis-panel.tsx` - Displays workflow results with dedicated renderers
 - `client/src/components/playback-controls.tsx` - Tone.js playback with loop/tempo
+- `client/src/components/chord-stepper.tsx` - Step-through chord playback with Tone.js
 
 ### Backend (Express.js + Python)
 - `server/routes.ts` - API endpoints for upload, workflows, pipeline operations
@@ -63,7 +72,10 @@ A web-based rehearsal and analysis tool for chamber music students. Users can up
 | POST | /api/pipeline/runStep | Execute a workflow step in the pipeline |
 | POST | /api/pipeline/reset | Reset pipeline to original score state |
 | GET | /api/pipeline/workspace/:scoreId | Get current workspace state |
+| POST | /api/pipeline/activateStream | Switch between original and derived streams |
+| POST | /api/pipeline/export | Export score selection as MIDI or MusicXML |
 | POST | /api/reduction | Get playback events for Tone.js |
+| GET | /api/score/:scoreId | Get score data by ID |
 
 ## Available Workflows
 
@@ -89,5 +101,6 @@ A web-based rehearsal and analysis tool for chamber music students. Users can up
 
 ## Known Limitations
 
-- Transform workflows operate on the original score; chained transforms do not persist modified streams to subsequent steps (planned for v0.3)
-- Playback currently only works with reduction_outer_voices workflow
+- Transform workflows operate on the original score; chained transforms do not persist modified streams to subsequent steps
+- Playback and ChordStepper work with workflows that return playbackEvents (chordify_and_chords, roman_numeral_analysis, reduction_outer_voices)
+- Annotations overlay displays below score, not as inline score annotations (Verovio limitation)

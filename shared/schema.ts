@@ -94,6 +94,24 @@ export const runStepRequestSchema = z.object({
 
 export type RunStepRequest = z.infer<typeof runStepRequestSchema>;
 
+export const annotationSchema = z.object({
+  type: z.enum(["text", "marker"]),
+  measure: z.number(),
+  offsetQL: z.number(),
+  part: z.string(),
+  text: z.string(),
+  style: z.record(z.string()).optional(),
+});
+
+export type Annotation = z.infer<typeof annotationSchema>;
+
+export const exportMetadataSchema = z.object({
+  formats: z.array(z.enum(["musicxml", "midi"])),
+  streamId: z.string().optional(),
+});
+
+export type ExportMetadata = z.infer<typeof exportMetadataSchema>;
+
 export const workflowResultSchema = z.object({
   workflowId: z.string(),
   workflowName: z.string(),
@@ -105,9 +123,14 @@ export const workflowResultSchema = z.object({
     beat: z.number(),
     duration: z.number(),
     frequencies: z.array(z.number()),
+    midiNotes: z.array(z.number()).optional(),
     chordLabel: z.string().optional(),
+    offsetQL: z.number().optional(),
   })).optional(),
   transformedStreamId: z.string().optional(),
+  annotations: z.array(annotationSchema).optional(),
+  exports: exportMetadataSchema.optional(),
+  timestamp: z.number().optional(),
 });
 
 export type WorkflowResult = z.infer<typeof workflowResultSchema>;

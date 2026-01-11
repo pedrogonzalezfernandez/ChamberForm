@@ -1,0 +1,95 @@
+Please update the existing project with the following UX + data-model upgrades. Keep the current architecture (Music21 backend + React/Vite frontend + Verovio rendering + Tone.js playback), but extend it so workflow outputs are visible directly on the score, playable step-by-step, exportable, and editable with a “derived score becomes new input” workflow.
+
+GOALS (high level)
+1) Results should appear on the score whenever possible (not only in lists).
+2) Users should be able to play analysis/reduction results, including chord-by-chord stepping.
+3) Users should be able to export workflow outputs (MusicXML + MIDI at minimum) for selected workflows.
+4) The pipeline UI must show ALL steps’ results, not only the latest.
+5) Add an editable “workspace score” concept: after a transform workflow (like reduction), the derived score can become the new active score; users can also make manual edits in the UI, and subsequent workflows operate on the edited score.
+
+A) SCORE-CENTERED VISUALIZATION (annotations rendered on score)
+- Add a unified “annotation layer” system.
+- For every workflow, return annotations with measure/beat positioning so the frontend can place them on the score.
+- For v0.1, implement score annotations for at least:
+  1) chordify_and_chords: place chord labels above the staff at their onset positions (measure + beat offset)
+  2) roman_numeral_analysis: place RN labels above the staff similarly
+  3) cadence_spotter: mark cadence measures with a visible badge/marker at the barline
+- Implementation approach:
+  - Backend returns annotations in a standard format:
+    annotation = {
+      "type": "text" | "marker",
+      "measure": int,
+      "offsetQL": float,         # quarterLength offset from measure start
+      "part": "ALL" | partId,    # where it should be displayed
+      "text": string,
+      "style": { ...optional... }
+    }
+  - Frontend uses Verovio to render SVG, then overlays annotations by converting (measure, staff, beat) -> SVG coordinates.
+    - Use Verovio’s APIs/events to find measure bounding boxes and staff coordinates if available; otherwise implement a practical heuristic mapping and iterate until labels are stable.
+  - Provide a toggle: “Show annotations on score” and “Show list view” for each workflow result.
+
+B) PLAYBACK UPGRADES (chords + step-through)
+1) For workflows that produce harmony/chords (chordify_and_chords, roman_numeral_analysis):
+   - Add “Play all chords” button for the selected region.
+   - Add “Chord stepper” UI:
+     - shows current chord label
+     - buttons: Prev / Play current / Next
+     - optional autoplay mode (plays chord then advances)
+2) Backend must provide a standardized playback event list for these workflows:
+   event = { "t": seconds, "dur": seconds, "freqs": [Hz...], "label": "C:maj", "measure": int, "offsetQL": float }
+3) Frontend schedules events with Tone.Transport (or similar), using sine tones or simple synth.
+4) Add a “Follow score” indicator:
+   - during playback, highlight the current chord/measure in the overlay/list (don’t need full note highlighting if too hard; chord label highlight is enough).
+
+C) EXPORT RESULTS (MIDI + MusicXML)
+- Add export support for workflows that generate a derived score or chord streams:
+  - chordify_and_chords: export chordified stream as MusicXML and MIDI
+  - reduction_outer_voices (and any transform): export derived stream as MusicXML and MIDI
+- Add backend endpoints:
+  - POST /api/export with body { scoreId, workspaceIdOrActiveScore, format: "musicxml"|"midi", scope: "selection"|"full", source: "original"|"active"|"step:<stepId>" }
+  - Response returns a downloadable file URL or direct file stream.
+- Frontend adds “Download MusicXML” and “Download MIDI” buttons in each step result card when export is available.
+
+D) PIPELINE RESULTS UI (show all steps)
+- Change Results panel into a list of step “cards”.
+- Each card shows:
+  - step name + params + timestamp
+  - tabs: Score overlay / List view / Playback / Export (show only what applies)
+  - an “Activate this output as current score” button if the step produced a derived score
+- Keep the “latest step” still visible, but don’t hide previous ones.
+
+E) WORKSPACE SCORE MODEL + EDITING
+1) Introduce an “Active Score” concept:
+   - The user can switch between:
+     - Original score
+     - Any derived score created by a transform workflow
+2) Editing:
+   - Add minimal score editing in the UI:
+     - For v0.1: allow editing chord labels as a proxy edit (e.g., user clicks a chord label overlay and changes its text; system stores this as an annotation override and uses it for playback/export).
+     - If feasible: allow basic note edits using Verovio editing capabilities (only if realistic). If not feasible, implement a simpler “editable reduction grid”:
+       - show chord events in a grid list (measure/beat + pitches)
+       - allow changing pitches via UI (add/remove/transpose chord tones)
+       - then “Commit edits” which updates the backend active workspace stream used for subsequent workflows.
+3) Backend must support storing edits:
+   - Keep an editable representation of the active stream in memory per scoreId/workspaceId.
+   - Provide endpoint:
+     - POST /api/workspace/applyEdits  (edits are chord-event based for v0.1)
+     - GET /api/workspace/active  (returns MEI for rendering + metadata)
+4) After edits, all subsequent workflows must run on the active (edited) workspace score.
+
+IMPLEMENTATION PRIORITY (do in this order)
+1) Results list shows all step cards.
+2) Add export (MIDI + MusicXML) for chordify and reduction.
+3) Add chord playback events + chord stepper UI.
+4) Add score overlay annotations for chord labels / RN labels / cadence markers.
+5) Add “Activate derived as current” switching between original/derived.
+6) Add minimal editing (chord-event grid edits) + commit to backend active score.
+
+DELIVERABLE
+After implementation:
+- I can upload a MusicXML, select Viola + measures 10–18, and see those measures rendered.
+- I can run chordify_and_chords and see chord labels positioned on the score in the correct places.
+- I can play the chord progression as a sequence AND step through chord-by-chord with Next/Prev.
+- I can download the chordified result as MIDI and MusicXML.
+- I can run multiple pipeline steps and view each step’s results (not only the last).
+- I can take a reduction output, set it as the active score, tweak chord events, commit, and then run another workflow on the edited result.

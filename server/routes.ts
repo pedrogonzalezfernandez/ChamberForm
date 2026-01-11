@@ -198,7 +198,15 @@ export async function registerRoutes(
         currentStreamId: workspace.currentStreamId,
       });
 
-      return res.json({ ...result, stepId });
+      const workflowResult = {
+        ...result,
+        stepId,
+        timestamp: Date.now(),
+        annotations: result.data?.annotations,
+        exports: result.data?.exports,
+      };
+
+      return res.json(workflowResult);
     } catch (error) {
       console.error("Pipeline step run error:", error);
       return res.status(500).json({
@@ -325,6 +333,68 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/pipeline/export", async (req, res) => {
+    try {
+      const { scoreId, stepId, format, selection } = req.body;
+
+      if (!scoreId || !format) {
+        return res.status(400).json({
+          error: "Missing required fields: scoreId, format",
+        });
+      }
+
+      if (!["musicxml", "midi"].includes(format)) {
+        return res.status(400).json({
+          error: "Format must be 'musicxml' or 'midi'",
+        });
+      }
+
+      const score = await storage.getScore(scoreId);
+      if (!score) {
+        return res.status(404).json({ error: "Score not found" });
+      }
+
+      const workspace = await storage.getWorkspace(scoreId);
+      const exportSelection = selection || workspace?.selection || {
+        partId: "ALL",
+        startMeasure: 1,
+        endMeasure: score.metadata.measureCount,
+      };
+
+      const { stdout } = await runPythonWorkflow(
+        "export",
+        [
+          "--start", exportSelection.startMeasure.toString(),
+          "--end", exportSelection.endMeasure.toString(),
+          "--part", exportSelection.partId || "ALL",
+          "--params", JSON.stringify({ format }),
+        ],
+        score.musicXmlData
+      );
+
+      const result = JSON.parse(stdout);
+
+      if (!result.success) {
+        return res.status(400).json({ error: result.error });
+      }
+
+      const buffer = Buffer.from(result.data, "base64");
+      
+      res.setHeader("Content-Type", result.contentType);
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${result.filename}"`
+      );
+      return res.send(buffer);
+    } catch (error) {
+      console.error("Export error:", error);
+      return res.status(500).json({
+        error: "Failed to export",
+        details: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
   app.get("/api/score/:scoreId", async (req, res) => {
     try {
       const score = await storage.getScore(req.params.scoreId);
@@ -341,6 +411,64 @@ export async function registerRoutes(
       console.error("Get score error:", error);
       return res.status(500).json({
         error: "Failed to get score",
+        details: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  app.post("/api/pipeline/activateStream", async (req, res) => {
+    try {
+      const { scoreId, streamId } = req.body;
+
+      if (!scoreId) {
+        return res.status(400).json({ error: "scoreId is required" });
+      }
+
+      const score = await storage.getScore(scoreId);
+      if (!score) {
+        return res.status(404).json({ error: "Score not found" });
+      }
+
+      let workspace = await storage.getWorkspace(scoreId);
+      if (!workspace) {
+        workspace = await storage.initWorkspace(scoreId);
+      }
+
+      if (streamId === null || streamId === "original") {
+        await storage.updateWorkspace(scoreId, { currentStreamId: null });
+        return res.json({
+          success: true,
+          activeStream: "original",
+          meiData: score.meiData,
+        });
+      }
+
+      const derivedXml = await storage.getDerivedStream(scoreId, streamId);
+      if (!derivedXml) {
+        return res.status(404).json({ error: "Derived stream not found" });
+      }
+
+      const { stdout } = await runPythonWorkflow("parse", [], derivedXml);
+      const parseResult = JSON.parse(stdout);
+
+      if (!parseResult.success) {
+        return res.status(400).json({
+          error: "Failed to parse derived stream",
+          details: parseResult.error,
+        });
+      }
+
+      await storage.updateWorkspace(scoreId, { currentStreamId: streamId });
+
+      return res.json({
+        success: true,
+        activeStream: streamId,
+        meiData: parseResult.meiData,
+      });
+    } catch (error) {
+      console.error("Activate stream error:", error);
+      return res.status(500).json({
+        error: "Failed to activate stream",
         details: error instanceof Error ? error.message : "Unknown error",
       });
     }
