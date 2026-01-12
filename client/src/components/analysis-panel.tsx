@@ -248,7 +248,7 @@ export function AnalysisPanel({
                             </TabsList>
                           </div>
                           
-                          <TabsContent value="list" className="px-3 pb-3 mt-0">
+                          <TabsContent value="list" className="px-3 pb-3 mt-0 max-h-64 overflow-y-auto">
                             <div className="space-y-4 pt-3" data-testid={`result-data-${index}`}>
                               {renderResultData(result?.workflowId || step.workflowId, result?.data || {})}
                             </div>

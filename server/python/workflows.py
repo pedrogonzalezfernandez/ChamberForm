@@ -177,7 +177,24 @@ def stream_to_musicxml(stream) -> str:
     """Convert a music21 stream to MusicXML string."""
     import tempfile
     import os
+    import sys
     try:
+        # Wrap in a Part and Score if needed for valid MusicXML export
+        from music21 import stream as streamModule
+        
+        if not isinstance(stream, streamModule.Score):
+            if isinstance(stream, streamModule.Part):
+                score = streamModule.Score()
+                score.insert(0, stream)
+                stream = score
+            else:
+                part = streamModule.Part()
+                for el in stream.recurse().notesAndRests:
+                    part.append(el)
+                score = streamModule.Score()
+                score.insert(0, part)
+                stream = score
+        
         with tempfile.NamedTemporaryFile(mode='w', suffix='.musicxml', delete=False) as f:
             temp_path = f.name
         stream.write('musicxml', temp_path)
@@ -186,6 +203,7 @@ def stream_to_musicxml(stream) -> str:
         os.unlink(temp_path)
         return xml_content
     except Exception as e:
+        print(f"stream_to_musicxml error: {e}", file=sys.stderr)
         return ""
 
 
