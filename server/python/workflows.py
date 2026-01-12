@@ -174,34 +174,18 @@ def workflow_global_key_estimate(score, selection: dict, params: dict) -> dict:
 
 
 def stream_to_musicxml(stream) -> str:
-    """Convert a music21 stream to MusicXML string."""
-    import tempfile
-    import os
+    """Convert a music21 stream to MusicXML string using GeneralObjectExporter.
+    
+    This is the same approach music21 uses in Jupyter notebooks - it works
+    with any music21 object without needing temp files.
+    """
     import sys
     try:
-        # Wrap in a Part and Score if needed for valid MusicXML export
-        from music21 import stream as streamModule
+        from music21.musicxml.m21ToXml import GeneralObjectExporter
         
-        if not isinstance(stream, streamModule.Score):
-            if isinstance(stream, streamModule.Part):
-                score = streamModule.Score()
-                score.insert(0, stream)
-                stream = score
-            else:
-                part = streamModule.Part()
-                for el in stream.recurse().notesAndRests:
-                    part.append(el)
-                score = streamModule.Score()
-                score.insert(0, part)
-                stream = score
-        
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.musicxml', delete=False) as f:
-            temp_path = f.name
-        stream.write('musicxml', temp_path)
-        with open(temp_path, 'r', encoding='utf-8') as f:
-            xml_content = f.read()
-        os.unlink(temp_path)
-        return xml_content
+        exporter = GeneralObjectExporter(stream)
+        musicxml_bytes = exporter.parse()
+        return musicxml_bytes.decode('utf-8')
     except Exception as e:
         print(f"stream_to_musicxml error: {e}", file=sys.stderr)
         return ""
