@@ -46,12 +46,14 @@ export function MiniScoreViewer({
         
         if (!isMounted) return;
 
-        const containerWidth = containerRef.current?.clientWidth || 600;
+        // Use a fixed page width that works well for chord notation
+        // This avoids issues when rendered in hidden tabs with 0 width
+        const fixedPageWidth = 2000;
         
         vrvToolkit.setOptions({
           scale: scale,
-          pageWidth: Math.floor(containerWidth * 100 / scale),
-          pageHeight: 1000,
+          pageWidth: fixedPageWidth,
+          pageHeight: 2000,
           adjustPageHeight: true,
           header: "none",
           footer: "none",
