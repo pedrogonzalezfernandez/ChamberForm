@@ -30,6 +30,7 @@ import {
 import type { WorkflowResult, PipelineStep, Workflow } from "@shared/schema";
 import { useState } from "react";
 import { ChordStepper } from "./chord-stepper";
+import { MiniScoreViewer } from "./mini-score-viewer";
 
 interface AnalysisPanelProps {
   steps: PipelineStep[];
@@ -134,6 +135,7 @@ export function AnalysisPanel({
               const isSelected = selectedStepId === step.id;
               const hasExports = result?.exports?.formats && result.exports.formats.length > 0;
               const hasPlayback = result?.playbackEvents && result.playbackEvents.length > 0;
+              const hasNotation = result?.data?.notationData && result.data.notationData.length > 0;
 
               return (
                 <div
@@ -225,6 +227,12 @@ export function AnalysisPanel({
                                 <List className="h-3 w-3" />
                                 List
                               </TabsTrigger>
+                              {hasNotation && (
+                                <TabsTrigger value="notation" className="text-xs gap-1">
+                                  <Music className="h-3 w-3" />
+                                  Notation
+                                </TabsTrigger>
+                              )}
                               {hasPlayback && (
                                 <TabsTrigger value="playback" className="text-xs gap-1">
                                   <SkipForward className="h-3 w-3" />
@@ -245,6 +253,18 @@ export function AnalysisPanel({
                               {renderResultData(result?.workflowId || step.workflowId, result?.data || {})}
                             </div>
                           </TabsContent>
+                          
+                          {hasNotation && (
+                            <TabsContent value="notation" className="px-3 pb-3 mt-0">
+                              <div className="pt-3" data-testid={`result-notation-${index}`}>
+                                <MiniScoreViewer 
+                                  meiData={result.data.notationData} 
+                                  height={200}
+                                  scale={30}
+                                />
+                              </div>
+                            </TabsContent>
+                          )}
                           
                           {hasPlayback && (
                             <TabsContent value="playback" className="px-3 pb-3 mt-0">

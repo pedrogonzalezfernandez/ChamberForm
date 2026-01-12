@@ -173,6 +173,18 @@ def workflow_global_key_estimate(score, selection: dict, params: dict) -> dict:
             }
 
 
+def stream_to_musicxml(stream) -> str:
+    """Convert a music21 stream to MusicXML string."""
+    from io import BytesIO
+    try:
+        fp = BytesIO()
+        stream.write('musicxml', fp)
+        fp.seek(0)
+        return fp.read().decode('utf-8')
+    except Exception:
+        return ""
+
+
 def workflow_chordify_and_chords(score, selection: dict, params: dict) -> dict:
     """Chordify the selected region and compute chord labels."""
     excerpt = get_selection(score, selection)
@@ -256,12 +268,15 @@ def workflow_chordify_and_chords(score, selection: dict, params: dict) -> dict:
         except Exception:
             continue
     
+    notation_xml = stream_to_musicxml(chordified)
+    
     return {
         "measures": measures_data,
         "totalChords": sum(len(m["chords"]) for m in measures_data),
         "playbackEvents": playback_events,
         "annotations": annotations,
         "exports": {"formats": ["musicxml", "midi"]},
+        "notationData": notation_xml if notation_xml else None,
     }
 
 
@@ -342,11 +357,14 @@ def workflow_roman_numeral_analysis(score, selection: dict, params: dict) -> dic
         except Exception:
             continue
     
+    notation_xml = stream_to_musicxml(chordified)
+    
     return {
         "key": str(estimated_key),
         "measures": measures_data,
         "playbackEvents": playback_events,
         "annotations": annotations,
+        "notationData": notation_xml if notation_xml else None,
     }
 
 
@@ -814,6 +832,8 @@ def workflow_reduction_outer_voices(score, selection: dict, params: dict) -> dic
         except Exception:
             continue
     
+    notation_xml = stream_to_musicxml(chordified)
+    
     return {
         "type": "transform",
         "soprano": soprano_part,
@@ -824,6 +844,7 @@ def workflow_reduction_outer_voices(score, selection: dict, params: dict) -> dic
         "defaultTempo": 120,
         "description": "Outer voices reduction (highest + lowest pitches at each chord change)",
         "exports": {"formats": ["musicxml", "midi"]},
+        "notationData": notation_xml if notation_xml else None,
     }
 
 
