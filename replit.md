@@ -6,6 +6,13 @@ A web-based rehearsal and analysis tool for chamber music students. Users can up
 
 ## Recent Changes
 
+- **2026-01-12**: v0.4 Spectral Analysis
+  - Added spectral analysis workflow computing centroid, spread, and common partial overlaps
+  - Spectral analyzer uses synthetic spectrum model with configurable partials and rolloff
+  - Added SpectralAnalysisResult component with summary stats and frame-by-frame data
+  - Improved stream_to_musicxml with multiple fallback methods and detailed logging
+  - Fixed measure/beat calculation to respect actual time signature (not hardcoded 4/4)
+
 - **2026-01-11**: v0.3 Enhanced UI/UX
   - Added ChordStepper component with Prev/Play/Next/Play All controls, volume slider, and scrubber for stepping through chord events
   - Added score annotation overlay system with toggle controls and measure-grouped display
@@ -51,7 +58,8 @@ A web-based rehearsal and analysis tool for chamber music students. Users can up
 ### Backend (Express.js + Python)
 - `server/routes.ts` - API endpoints for upload, workflows, pipeline operations
 - `server/storage.ts` - In-memory storage with workspace state (scores, derived streams, step cache)
-- `server/python/workflows.py` - Music21 workflow registry with 10 workflows
+- `server/python/workflows.py` - Music21 workflow registry with 11 workflows
+- `server/python/spectral.py` - Spectral analysis module (synthetic spectrum descriptors)
 
 ### Shared
 - `shared/schema.ts` - TypeScript types and Zod validation schemas
@@ -91,6 +99,7 @@ A web-based rehearsal and analysis tool for chamber music students. Users can up
 | rhythm_skeleton | Rhythm Skeleton | analysis | Rhythmic pattern analysis |
 | motif_finder_interval_contour | Motif Finder (Interval Contour) | analysis | Melodic motif detection |
 | reduction_outer_voices | Outer Voices Reduction | transform | Bass/soprano reduction with playback |
+| spectral_analysis | Spectral Analysis | analysis | Centroid, spread, common partials for orchestration |
 
 ## Adding New Workflows
 

@@ -174,21 +174,64 @@ def workflow_global_key_estimate(score, selection: dict, params: dict) -> dict:
 
 
 def stream_to_musicxml(stream) -> str:
-    """Convert a music21 stream to MusicXML string using GeneralObjectExporter.
+    """Convert a music21 stream to MusicXML string.
     
-    This is the same approach music21 uses in Jupyter notebooks - it works
-    with any music21 object without needing temp files.
+    Tries multiple approaches in order of reliability:
+    1. GeneralObjectExporter (works with any music21 object)
+    2. BytesIO with write() method
+    3. Temp file fallback
     """
     import sys
+    import io
+    
+    # Log what we're trying to export
+    stream_type = type(stream).__name__
+    stream_len = len(list(stream.recurse().notes)) if hasattr(stream, 'recurse') else 0
+    print(f"stream_to_musicxml: type={stream_type}, notes={stream_len}", file=sys.stderr)
+    
+    # Method 1: GeneralObjectExporter (most reliable for any stream type)
     try:
         from music21.musicxml.m21ToXml import GeneralObjectExporter
-        
         exporter = GeneralObjectExporter(stream)
         musicxml_bytes = exporter.parse()
-        return musicxml_bytes.decode('utf-8')
+        if musicxml_bytes:
+            result = musicxml_bytes.decode('utf-8')
+            if result and len(result) > 100:
+                print(f"stream_to_musicxml: GeneralObjectExporter success, len={len(result)}", file=sys.stderr)
+                return result
     except Exception as e:
-        print(f"stream_to_musicxml error: {e}", file=sys.stderr)
-        return ""
+        print(f"stream_to_musicxml: GeneralObjectExporter failed: {e}", file=sys.stderr)
+    
+    # Method 2: StringIO write (music21 writes str, not bytes)
+    try:
+        buffer = io.StringIO()
+        stream.write('musicxml', fp=buffer)
+        buffer.seek(0)
+        result = buffer.read()
+        if result and len(result) > 100:
+            print(f"stream_to_musicxml: StringIO success, len={len(result)}", file=sys.stderr)
+            return result
+    except Exception as e:
+        print(f"stream_to_musicxml: StringIO failed: {e}", file=sys.stderr)
+    
+    # Method 3: Temp file fallback
+    try:
+        import tempfile
+        import os
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.musicxml', delete=False) as f:
+            temp_path = f.name
+        stream.write('musicxml', temp_path)
+        with open(temp_path, 'r', encoding='utf-8') as f:
+            result = f.read()
+        os.unlink(temp_path)
+        if result and len(result) > 100:
+            print(f"stream_to_musicxml: temp file success, len={len(result)}", file=sys.stderr)
+            return result
+    except Exception as e:
+        print(f"stream_to_musicxml: temp file failed: {e}", file=sys.stderr)
+    
+    print(f"stream_to_musicxml: all methods failed for {stream_type}", file=sys.stderr)
+    return ""
 
 
 def workflow_chordify_and_chords(score, selection: dict, params: dict) -> dict:
@@ -854,6 +897,95 @@ def workflow_reduction_outer_voices(score, selection: dict, params: dict) -> dic
     }
 
 
+def workflow_spectral_analysis(score, selection: dict, params: dict) -> dict:
+    """Compute spectral descriptors for each event-change verticality."""
+    from spectral import analyze
+    
+    excerpt = get_selection(score, selection)
+    
+    max_partials = int(params.get("maxPartials", 16))
+    rolloff = float(params.get("rolloff", 1.0))
+    tolerance_cents = float(params.get("toleranceCents", 10.0))
+    
+    frames = analyze(
+        excerpt,
+        toSoundingPitch=True,
+        keepDuplicates=True,
+        includeEmpty=False,
+        maxPartials=max_partials,
+        rolloff=rolloff,
+        computeCommonPartials=True,
+        commonPartialToleranceCents=tolerance_cents,
+    )
+    
+    frames_data = []
+    annotations = []
+    
+    start_m = selection.get("startMeasure", 1)
+    
+    try:
+        ts = excerpt.recurse().getElementsByClass('TimeSignature').first()
+        beats_per_measure = float(ts.beatCount) if ts else 4.0
+    except Exception:
+        beats_per_measure = 4.0
+    
+    for frame in frames:
+        measure_offset = int(frame.offset // beats_per_measure)
+        measure_num = start_m + measure_offset
+        beat_in_measure = frame.offset % beats_per_measure
+        
+        frame_dict = {
+            "offset": frame.offset,
+            "endOffset": frame.endOffset,
+            "measure": measure_num,
+            "beat": round(beat_in_measure + 1, 2),
+            "fundamentalsHz": list(frame.fundamentalsHz),
+            "centroidHz": round(frame.centroidHz, 2) if frame.centroidHz else None,
+            "spreadHz": round(frame.spreadHz, 2) if frame.spreadHz else None,
+            "totalPartials": frame.totalPartials,
+            "commonPartialCount": frame.commonPartialCount,
+        }
+        frames_data.append(frame_dict)
+        
+        if frame.centroidHz:
+            annotations.append({
+                "type": "text",
+                "measure": measure_num,
+                "offsetQL": beat_in_measure,
+                "part": "ALL",
+                "text": f"C:{int(frame.centroidHz)}Hz",
+                "style": {"category": "spectral"}
+            })
+    
+    centroid_values = [f["centroidHz"] for f in frames_data if f["centroidHz"]]
+    spread_values = [f["spreadHz"] for f in frames_data if f["spreadHz"]]
+    common_values = [f["commonPartialCount"] for f in frames_data if f["commonPartialCount"] is not None]
+    
+    summary = {
+        "frameCount": len(frames_data),
+        "centroidRange": {
+            "min": round(min(centroid_values), 2) if centroid_values else None,
+            "max": round(max(centroid_values), 2) if centroid_values else None,
+            "avg": round(sum(centroid_values) / len(centroid_values), 2) if centroid_values else None,
+        },
+        "spreadRange": {
+            "min": round(min(spread_values), 2) if spread_values else None,
+            "max": round(max(spread_values), 2) if spread_values else None,
+            "avg": round(sum(spread_values) / len(spread_values), 2) if spread_values else None,
+        },
+        "commonPartialsTotal": sum(common_values) if common_values else 0,
+        "maxPartials": max_partials,
+        "rolloff": rolloff,
+    }
+    
+    return {
+        "summary": summary,
+        "frames": frames_data,
+        "annotations": annotations,
+        "description": "Spectral analysis: centroid (brightness), spread, and common partial overlaps",
+    }
+
+
 WORKFLOW_REGISTRY = {
     "score_summary": {
         "id": "score_summary",
@@ -943,6 +1075,18 @@ WORKFLOW_REGISTRY = {
         "type": "transform",
         "params": [],
         "function": workflow_reduction_outer_voices
+    },
+    "spectral_analysis": {
+        "id": "spectral_analysis",
+        "name": "Spectral Analysis",
+        "description": "Compute spectral centroid, spread, and common partial overlaps for orchestration analysis",
+        "type": "analysis",
+        "params": [
+            {"name": "maxPartials", "type": "number", "label": "Max Partials", "required": False, "default": 16},
+            {"name": "rolloff", "type": "number", "label": "Amplitude Rolloff", "required": False, "default": 1.0},
+            {"name": "toleranceCents", "type": "number", "label": "Common Partial Tolerance (cents)", "required": False, "default": 10.0}
+        ],
+        "function": workflow_spectral_analysis
     },
 }
 

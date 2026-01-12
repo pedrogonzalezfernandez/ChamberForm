@@ -343,6 +343,8 @@ function renderResultData(workflowId: string, data: Record<string, any>): JSX.El
       return <MotifFinderResult data={data} />;
     case "reduction_outer_voices":
       return <ReductionResult data={data} />;
+    case "spectral_analysis":
+      return <SpectralAnalysisResult data={data} />;
     default:
       return <GenericResult data={data} />;
   }
@@ -653,6 +655,104 @@ function ReductionResult({ data }: { data: any }) {
         <span className="text-muted-foreground">Playback events</span>
         <span className="font-medium">{data.eventCount}</span>
       </div>
+      {data.description && (
+        <p className="text-xs text-muted-foreground italic">{data.description}</p>
+      )}
+    </div>
+  );
+}
+
+function SpectralAnalysisResult({ data }: { data: any }) {
+  const summary = data.summary || {};
+  const frames = data.frames || [];
+  
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2">
+        <BarChart3 className="h-4 w-4 text-muted-foreground" />
+        <span className="text-sm font-medium">Spectral Analysis</span>
+        <Badge variant="secondary" className="text-xs">
+          {summary.frameCount || 0} frames
+        </Badge>
+      </div>
+      
+      <div className="grid grid-cols-2 gap-3">
+        <div className="p-3 rounded bg-muted/30">
+          <span className="text-xs text-muted-foreground block mb-1">Spectral Centroid</span>
+          <div className="space-y-1 text-sm">
+            {summary.centroidRange && (
+              <>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Min</span>
+                  <span className="font-mono">{summary.centroidRange.min?.toFixed(0)} Hz</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Max</span>
+                  <span className="font-mono">{summary.centroidRange.max?.toFixed(0)} Hz</span>
+                </div>
+                <div className="flex justify-between font-medium">
+                  <span className="text-muted-foreground">Avg</span>
+                  <span className="font-mono">{summary.centroidRange.avg?.toFixed(0)} Hz</span>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+        
+        <div className="p-3 rounded bg-muted/30">
+          <span className="text-xs text-muted-foreground block mb-1">Spectral Spread</span>
+          <div className="space-y-1 text-sm">
+            {summary.spreadRange && (
+              <>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Min</span>
+                  <span className="font-mono">{summary.spreadRange.min?.toFixed(0)} Hz</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Max</span>
+                  <span className="font-mono">{summary.spreadRange.max?.toFixed(0)} Hz</span>
+                </div>
+                <div className="flex justify-between font-medium">
+                  <span className="text-muted-foreground">Avg</span>
+                  <span className="font-mono">{summary.spreadRange.avg?.toFixed(0)} Hz</span>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+      
+      <div className="flex items-center justify-between text-sm p-2 rounded bg-muted/30">
+        <span className="text-muted-foreground">Common Partials (fusion index)</span>
+        <span className="font-mono font-medium">{summary.commonPartialsTotal || 0}</span>
+      </div>
+      
+      {frames.length > 0 && (
+        <div className="border-t pt-3">
+          <span className="text-xs text-muted-foreground block mb-2">
+            First 10 Spectral Frames
+          </span>
+          <div className="space-y-1.5 max-h-48 overflow-y-auto">
+            {frames.slice(0, 10).map((frame: any, i: number) => (
+              <div key={i} className="flex items-center gap-2 text-xs p-1.5 rounded bg-muted/20">
+                <span className="text-muted-foreground w-12">
+                  @{frame.offset?.toFixed(1)}
+                </span>
+                <span className="font-mono flex-1">
+                  C:{frame.centroidHz?.toFixed(0) || '—'}
+                </span>
+                <span className="font-mono text-muted-foreground">
+                  S:{frame.spreadHz?.toFixed(0) || '—'}
+                </span>
+                <span className="text-muted-foreground">
+                  {frame.fundamentalsHz?.length || 0} notes
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      
       {data.description && (
         <p className="text-xs text-muted-foreground italic">{data.description}</p>
       )}
