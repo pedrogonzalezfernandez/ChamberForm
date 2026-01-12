@@ -174,26 +174,43 @@ def workflow_global_key_estimate(score, selection: dict, params: dict) -> dict:
 
 
 def stream_to_musicxml(stream) -> str:
-    """Convert a music21 stream to MusicXML string using GeneralObjectExporter.
+    """Convert a music21 stream to MusicXML string.
     
-    This is the same approach music21 uses in Jupyter notebooks - it works
-    with any music21 object without needing temp files.
+    Uses GeneralObjectExporter which handles any music21 object.
+    Falls back to write() method if that fails.
     """
     import sys
+    
+    # Method 1: GeneralObjectExporter (preferred - no temp files)
     try:
         from music21.musicxml.m21ToXml import GeneralObjectExporter
         
-        print(f"stream_to_musicxml: Converting stream of type {type(stream).__name__}", file=sys.stderr)
+        print(f"stream_to_musicxml: Trying GeneralObjectExporter for {type(stream).__name__}", file=sys.stderr)
         exporter = GeneralObjectExporter(stream)
         musicxml_bytes = exporter.parse()
         result = musicxml_bytes.decode('utf-8')
-        print(f"stream_to_musicxml: Success, got {len(result)} bytes", file=sys.stderr)
+        print(f"stream_to_musicxml: Success with GeneralObjectExporter, {len(result)} bytes", file=sys.stderr)
         return result
-    except Exception as e:
-        import traceback
-        print(f"stream_to_musicxml error: {e}", file=sys.stderr)
-        print(traceback.format_exc(), file=sys.stderr)
-        return ""
+    except Exception as e1:
+        print(f"stream_to_musicxml: GeneralObjectExporter failed: {e1}", file=sys.stderr)
+        
+        # Method 2: Fallback using write() with temp file
+        try:
+            import tempfile
+            import os
+            
+            print(f"stream_to_musicxml: Trying write() method", file=sys.stderr)
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.musicxml', delete=False) as f:
+                temp_path = f.name
+            stream.write('musicxml', temp_path)
+            with open(temp_path, 'r', encoding='utf-8') as f:
+                result = f.read()
+            os.unlink(temp_path)
+            print(f"stream_to_musicxml: Success with write(), {len(result)} bytes", file=sys.stderr)
+            return result
+        except Exception as e2:
+            print(f"stream_to_musicxml: write() also failed: {e2}", file=sys.stderr)
+            return ""
 
 
 def workflow_chordify_and_chords(score, selection: dict, params: dict) -> dict:
