@@ -1194,6 +1194,12 @@ if __name__ == "__main__":
                 params = {}
             
             result = run_workflow(args.workflow, score, selection, params)
+            # Debug: print result keys to stderr
+            import sys
+            print(f"DEBUG run_workflow result keys: {list(result.keys())}", file=sys.stderr)
+            if 'notationData' in result:
+                nd = result['notationData']
+                print(f"DEBUG notationData type={type(nd).__name__}, len={len(nd) if nd else 0}", file=sys.stderr)
             print(json.dumps(result))
         except Exception as e:
             print(json.dumps({"error": str(e)}))
