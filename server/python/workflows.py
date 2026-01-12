@@ -296,9 +296,12 @@ def workflow_chordify_and_chords(score, selection: dict, params: dict) -> dict:
         except Exception:
             continue
     
+    import sys
+    print(f"chordify: Calling stream_to_musicxml on {type(chordified).__name__}", file=sys.stderr)
     notation_xml = stream_to_musicxml(chordified)
+    print(f"chordify: notation_xml length = {len(notation_xml) if notation_xml else 0}", file=sys.stderr)
     
-    return {
+    result = {
         "measures": measures_data,
         "totalChords": sum(len(m["chords"]) for m in measures_data),
         "playbackEvents": playback_events,
@@ -306,6 +309,8 @@ def workflow_chordify_and_chords(score, selection: dict, params: dict) -> dict:
         "exports": {"formats": ["musicxml", "midi"]},
         "notationData": notation_xml if notation_xml else None,
     }
+    print(f"chordify: result has notationData = {result.get('notationData') is not None}", file=sys.stderr)
+    return result
 
 
 def workflow_roman_numeral_analysis(score, selection: dict, params: dict) -> dict:
