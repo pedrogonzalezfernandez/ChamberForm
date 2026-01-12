@@ -135,7 +135,7 @@ export function AnalysisPanel({
               const isSelected = selectedStepId === step.id;
               const hasExports = result?.exports?.formats && result.exports.formats.length > 0;
               const hasPlayback = result?.playbackEvents && result.playbackEvents.length > 0;
-              const hasNotation = result?.data?.notationData && result.data.notationData.length > 0;
+              const hasNotation = result?.notationData && result.notationData.length > 0;
 
               return (
                 <div
@@ -258,7 +258,7 @@ export function AnalysisPanel({
                             <TabsContent value="notation" className="px-3 pb-3 mt-0">
                               <div className="pt-3" data-testid={`result-notation-${index}`}>
                                 <MiniScoreViewer 
-                                  meiData={result.data.notationData} 
+                                  meiData={result.notationData || ""} 
                                   height={200}
                                   scale={30}
                                 />

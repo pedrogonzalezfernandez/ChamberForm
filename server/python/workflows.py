@@ -183,11 +183,16 @@ def stream_to_musicxml(stream) -> str:
     try:
         from music21.musicxml.m21ToXml import GeneralObjectExporter
         
+        print(f"stream_to_musicxml: Converting stream of type {type(stream).__name__}", file=sys.stderr)
         exporter = GeneralObjectExporter(stream)
         musicxml_bytes = exporter.parse()
-        return musicxml_bytes.decode('utf-8')
+        result = musicxml_bytes.decode('utf-8')
+        print(f"stream_to_musicxml: Success, got {len(result)} bytes", file=sys.stderr)
+        return result
     except Exception as e:
+        import traceback
         print(f"stream_to_musicxml error: {e}", file=sys.stderr)
+        print(traceback.format_exc(), file=sys.stderr)
         return ""
 
 
