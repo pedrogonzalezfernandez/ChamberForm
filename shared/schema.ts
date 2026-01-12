@@ -131,7 +131,6 @@ export const workflowResultSchema = z.object({
   annotations: z.array(annotationSchema).optional(),
   exports: exportMetadataSchema.optional(),
   timestamp: z.number().optional(),
-  notationData: z.string().nullable().optional(),
 });
 
 export type WorkflowResult = z.infer<typeof workflowResultSchema>;

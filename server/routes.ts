@@ -150,10 +150,7 @@ export async function registerRoutes(
         workflowArgs.push("--params", JSON.stringify(params));
       }
 
-      const { stdout, stderr } = await runPythonWorkflow("run", workflowArgs, score.musicXmlData);
-      if (stderr) {
-        console.log("Python workflow stderr:", stderr);
-      }
+      const { stdout } = await runPythonWorkflow("run", workflowArgs, score.musicXmlData);
       const result = JSON.parse(stdout);
 
       if (result.error) {

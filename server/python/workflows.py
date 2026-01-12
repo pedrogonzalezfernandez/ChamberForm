@@ -174,43 +174,21 @@ def workflow_global_key_estimate(score, selection: dict, params: dict) -> dict:
 
 
 def stream_to_musicxml(stream) -> str:
-    """Convert a music21 stream to MusicXML string.
+    """Convert a music21 stream to MusicXML string using GeneralObjectExporter.
     
-    Uses GeneralObjectExporter which handles any music21 object.
-    Falls back to write() method if that fails.
+    This is the same approach music21 uses in Jupyter notebooks - it works
+    with any music21 object without needing temp files.
     """
     import sys
-    
-    # Method 1: GeneralObjectExporter (preferred - no temp files)
     try:
         from music21.musicxml.m21ToXml import GeneralObjectExporter
         
-        print(f"stream_to_musicxml: Trying GeneralObjectExporter for {type(stream).__name__}", file=sys.stderr)
         exporter = GeneralObjectExporter(stream)
         musicxml_bytes = exporter.parse()
-        result = musicxml_bytes.decode('utf-8')
-        print(f"stream_to_musicxml: Success with GeneralObjectExporter, {len(result)} bytes", file=sys.stderr)
-        return result
-    except Exception as e1:
-        print(f"stream_to_musicxml: GeneralObjectExporter failed: {e1}", file=sys.stderr)
-        
-        # Method 2: Fallback using write() with temp file
-        try:
-            import tempfile
-            import os
-            
-            print(f"stream_to_musicxml: Trying write() method", file=sys.stderr)
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.musicxml', delete=False) as f:
-                temp_path = f.name
-            stream.write('musicxml', temp_path)
-            with open(temp_path, 'r', encoding='utf-8') as f:
-                result = f.read()
-            os.unlink(temp_path)
-            print(f"stream_to_musicxml: Success with write(), {len(result)} bytes", file=sys.stderr)
-            return result
-        except Exception as e2:
-            print(f"stream_to_musicxml: write() also failed: {e2}", file=sys.stderr)
-            return ""
+        return musicxml_bytes.decode('utf-8')
+    except Exception as e:
+        print(f"stream_to_musicxml error: {e}", file=sys.stderr)
+        return ""
 
 
 def workflow_chordify_and_chords(score, selection: dict, params: dict) -> dict:
@@ -296,12 +274,9 @@ def workflow_chordify_and_chords(score, selection: dict, params: dict) -> dict:
         except Exception:
             continue
     
-    import sys
-    print(f"chordify: Calling stream_to_musicxml on {type(chordified).__name__}", file=sys.stderr)
     notation_xml = stream_to_musicxml(chordified)
-    print(f"chordify: notation_xml length = {len(notation_xml) if notation_xml else 0}", file=sys.stderr)
     
-    result = {
+    return {
         "measures": measures_data,
         "totalChords": sum(len(m["chords"]) for m in measures_data),
         "playbackEvents": playback_events,
@@ -309,8 +284,6 @@ def workflow_chordify_and_chords(score, selection: dict, params: dict) -> dict:
         "exports": {"formats": ["musicxml", "midi"]},
         "notationData": notation_xml if notation_xml else None,
     }
-    print(f"chordify: result has notationData = {result.get('notationData') is not None}", file=sys.stderr)
-    return result
 
 
 def workflow_roman_numeral_analysis(score, selection: dict, params: dict) -> dict:
@@ -1194,12 +1167,6 @@ if __name__ == "__main__":
                 params = {}
             
             result = run_workflow(args.workflow, score, selection, params)
-            # Debug: print result keys to stderr
-            import sys
-            print(f"DEBUG run_workflow result keys: {list(result.keys())}", file=sys.stderr)
-            if 'notationData' in result:
-                nd = result['notationData']
-                print(f"DEBUG notationData type={type(nd).__name__}, len={len(nd) if nd else 0}", file=sys.stderr)
             print(json.dumps(result))
         except Exception as e:
             print(json.dumps({"error": str(e)}))
