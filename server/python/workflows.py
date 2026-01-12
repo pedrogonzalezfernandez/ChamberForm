@@ -175,13 +175,17 @@ def workflow_global_key_estimate(score, selection: dict, params: dict) -> dict:
 
 def stream_to_musicxml(stream) -> str:
     """Convert a music21 stream to MusicXML string."""
-    from io import BytesIO
+    import tempfile
+    import os
     try:
-        fp = BytesIO()
-        stream.write('musicxml', fp)
-        fp.seek(0)
-        return fp.read().decode('utf-8')
-    except Exception:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.musicxml', delete=False) as f:
+            temp_path = f.name
+        stream.write('musicxml', temp_path)
+        with open(temp_path, 'r', encoding='utf-8') as f:
+            xml_content = f.read()
+        os.unlink(temp_path)
+        return xml_content
+    except Exception as e:
         return ""
 
 
