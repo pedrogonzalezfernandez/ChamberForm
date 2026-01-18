@@ -1,6 +1,8 @@
 node_modules
 dist
 release
+.app
+ChamberForm.app/
 .DS_Store
 server/public
 vite.config.ts.*
