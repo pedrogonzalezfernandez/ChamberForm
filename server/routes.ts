@@ -4,6 +4,7 @@ import { storage } from "./storage";
 import multer from "multer";
 import { spawn } from "child_process";
 import path from "path";
+import fs from "fs";
 import { runStepRequestSchema, selectionSchema } from "@shared/schema";
 import { z } from "zod";
 
@@ -27,8 +28,30 @@ function runPythonWorkflow(
   input?: string
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    const pythonPath = path.join(process.cwd(), "server", "python", "workflows.py");
-    const proc = spawn("python", [pythonPath, command, ...args]);
+    const workflowsBin = process.env.WORKFLOWS_BIN;
+    const pythonBin =
+      process.env.PYTHON_BIN || (process.platform === "win32" ? "python" : "python3");
+    const defaultWorkflowsPy =
+      process.env.NODE_ENV === "production"
+        ? path.join(process.cwd(), "dist", "python", "workflows.py")
+        : path.join(process.cwd(), "server", "python", "workflows.py");
+    const workflowsPy = process.env.WORKFLOWS_PY || defaultWorkflowsPy;
+    const defaultBundledBin =
+      process.env.NODE_ENV === "production"
+        ? path.join(process.cwd(), "dist", "workflows-bin", "workflows")
+        : undefined;
+    const bundledBin =
+      workflowsBin ||
+      (defaultBundledBin && fs.existsSync(defaultBundledBin)
+        ? defaultBundledBin
+        : undefined);
+
+    const spawnCmd = bundledBin || pythonBin;
+    const spawnArgs = bundledBin
+      ? [command, ...args]
+      : [workflowsPy, command, ...args];
+
+    const proc = spawn(spawnCmd, spawnArgs);
 
     let stdout = "";
     let stderr = "";

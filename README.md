@@ -31,6 +31,39 @@ Run the development server:
 npm run dev
 ```
 
+## macOS Desktop App (Electron)
+
+This repo can be wrapped as a macOS desktop app by running the existing server locally and loading it in an Electron `BrowserWindow`.
+
+### Prerequisites
+
+- Node.js (for building/packaging)
+- Python 3 + `music21` available on your PATH (used by `server/python/workflows.py`)
+  - If needed, point Electron/Node at a specific interpreter: `PYTHON_BIN=/path/to/python3`
+
+### Run (development)
+
+```bash
+npm install
+npm run desktop:dev
+```
+
+### Run (production preview, not packaged)
+
+```bash
+npm run desktop:preview
+```
+
+### Build a distributable macOS app (DMG/ZIP)
+
+```bash
+PYTHON_BIN=$(which python3) npm run desktop:dist
+```
+
+Notes:
+- On macOS, the desktop wrapper runs the server on `127.0.0.1` and uses an OS-assigned port (`PORT=0`).
+- For a fully self-contained app (no Python required by end users), the build machine must have Python 3 and `music21` installed; `desktop:dist` will PyInstaller-bundle `server/python/workflows.py`.
+
 ## How to Add a New Workflow
 
 The workflow system is designed to be extensible. To add a new music21 analysis workflow:
