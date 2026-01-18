@@ -1,6 +1,6 @@
 # ChamberForm - Music Rehearsal Tool
 
-A web-based rehearsal and analysis tool for chamber music students. Upload MusicXML scores, analyze harmony, and practice tuning with sine-tone playback.
+A web-based rehearsal and analysis tool for chamber music students. Upload MusicXML scores, analyze harmony, and practice tuning with sine-tone playback. You can download the App installer here: https://drive.google.com/drive/folders/1E5G8ET2NITuBf-cRwmi7tWBYKR2MQVoG?usp=sharing 
 
 ## Features
 
