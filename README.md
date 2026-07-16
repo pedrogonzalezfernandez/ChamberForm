@@ -12,12 +12,6 @@ A web-based rehearsal and analysis tool for chamber music students. Upload Music
   - Harmonic reduction for playback
 - **Tuning Practice**: Play sine-tone harmonic reductions with loop and tempo controls
 
-## Running in Replit
-
-1. Click the "Run" button or use the workflow "Start application"
-2. The app will start on port 5000
-3. Open the Webview to access the application
-
 ### Development
 
 The project uses:
