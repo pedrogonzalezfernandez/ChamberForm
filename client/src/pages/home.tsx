@@ -6,6 +6,7 @@ import { SelectionPanel } from "@/components/selection-panel";
 import { PipelinePanel } from "@/components/pipeline-panel";
 import { AnalysisPanel } from "@/components/analysis-panel";
 import { PlaybackControls } from "@/components/playback-controls";
+import { EnsemblePlaybackPanel } from "@/components/ensemble-playback-panel";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
@@ -575,7 +576,16 @@ export default function Home() {
 
               <Card>
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-base font-medium">Playback</CardTitle>
+                  <CardTitle className="text-base font-medium">Ensemble Playback</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <EnsemblePlaybackPanel scoreId={scoreData.scoreId} />
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base font-medium">Tuning Practice</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <PlaybackControls

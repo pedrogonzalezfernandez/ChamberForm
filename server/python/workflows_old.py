@@ -64,114 +64,6 @@ def get_score_parts(score) -> List[str]:
     return parts
 
 
-def _extract_timed_pitch_events(part_excerpt):
-    """Return sounding pitch events with offsets in quarterLength units.
-
-    Each event is a dict with start/end offsets and one or more pitches.  Chords are
-    preserved as pitch collections.  Offsets come from the flattened excerpt, so
-    changing meter and pickup measures do not require any hard-coded bar length.
-    """
-    events = []
-    try:
-        flat = part_excerpt.flatten()
-    except Exception:
-        flat = part_excerpt.flat
-
-    for element in flat.notes:
-        try:
-            start = float(element.offset)
-            dur = float(element.quarterLength)
-        except Exception:
-            continue
-        if dur <= 0:
-            continue
-
-        pitches = []
-        if hasattr(element, 'pitch'):
-            pitches = [element.pitch]
-        elif hasattr(element, 'pitches'):
-            pitches = list(element.pitches)
-        if not pitches:
-            continue
-
-        events.append({
-            'start': start,
-            'end': start + dur,
-            'pitches': pitches,
-            'element': element,
-        })
-    return events
-
-
-def _active_pitches_at(events, offset, tolerance=1e-7):
-    """Return pitches sounding at offset (half-open interval [start, end))."""
-    active = []
-    for ev in events:
-        if ev['start'] - tolerance <= offset < ev['end'] - tolerance:
-            active.extend(ev['pitches'])
-    return active
-
-
-def _vertical_change_offsets(*event_lists):
-    """Sorted offsets at which any sounding pitch collection starts or ends."""
-    offsets = set()
-    for events in event_lists:
-        for ev in events:
-            offsets.add(round(ev['start'], 9))
-            offsets.add(round(ev['end'], 9))
-    return sorted(offsets)
-
-
-def _measure_and_beat_from_offset(part_excerpt, offset, default_measure=1):
-    """Map a flattened quarterLength offset to notated measure number and beat."""
-    try:
-        measures = list(part_excerpt.getElementsByClass('Measure'))
-        if not measures:
-            measures = list(part_excerpt.recurse().getElementsByClass('Measure'))
-    except Exception:
-        measures = []
-
-    if not measures:
-        return default_measure, float(offset) + 1.0, float(offset)
-
-    measures = sorted(measures, key=lambda m: float(m.offset))
-    chosen = measures[0]
-    for m in measures:
-        if float(m.offset) <= offset + 1e-9:
-            chosen = m
-        else:
-            break
-
-    local_offset = max(0.0, float(offset) - float(chosen.offset))
-    beat = local_offset + 1.0
-    try:
-        ts = chosen.timeSignature or chosen.getContextByClass('TimeSignature')
-        if ts is not None:
-            beat = float(ts.getBeat(local_offset))
-    except Exception:
-        try:
-            beat_duration = float(ts.beatDuration.quarterLength)
-            if beat_duration > 0:
-                beat = local_offset / beat_duration + 1.0
-        except Exception:
-            pass
-
-    measure_num = getattr(chosen, 'measureNumber', None) or default_measure
-    return int(measure_num), float(beat), local_offset
-
-
-def _get_two_part_excerpts(score, part_a_idx, part_b_idx, start_m, end_m):
-    """Extract two selected parts with a common measure range."""
-    parts = list(score.parts)
-    try:
-        excerpt_a = parts[part_a_idx].measures(start_m, end_m)
-        excerpt_b = parts[part_b_idx].measures(start_m, end_m)
-    except Exception:
-        excerpt_a = parts[part_a_idx]
-        excerpt_b = parts[part_b_idx]
-    return excerpt_a, excerpt_b
-
-
 def workflow_score_summary(score, selection: dict, params: dict) -> dict:
     """Get summary information about the selected region."""
     from music21 import tempo, key, meter
@@ -231,92 +123,55 @@ def workflow_score_summary(score, selection: dict, params: dict) -> dict:
 
 
 def workflow_global_key_estimate(score, selection: dict, params: dict) -> dict:
-    """Estimate global key using Krumhansl-Schmuckler with real correlations."""
+    """Estimate the global key of the selected section."""
     from music21 import analysis
-
+    
     excerpt = get_selection(score, selection)
-
+    
     try:
-        key_analysis = analysis.discrete.KrumhanslSchmuckler()
+        key_analysis = analysis.discrete.KrumhanslSchmuckler(excerpt)
         key_result = key_analysis.getSolution(excerpt)
-
-        if key_result is None:
-            return {
-                "key": "Could not determine",
-                "confidence": 0.0,
-                "correlation": None,
-                "margin": None,
-                "alternates": [],
-                "alternateDetails": [],
-                "notes": "No pitched material available for key estimation",
-            }
-
-        correlation = getattr(key_result, 'correlationCoefficient', None)
-        alt_objects = list(getattr(key_result, 'alternateInterpretations', []) or [])
-        alternate_details = []
-        for alt in alt_objects[:3]:
-            alternate_details.append({
-                "key": str(alt),
-                "correlation": round(float(alt.correlationCoefficient), 4)
-                    if getattr(alt, 'correlationCoefficient', None) is not None else None,
-            })
-
-        second_corr = None
-        if alt_objects and getattr(alt_objects[0], 'correlationCoefficient', None) is not None:
-            second_corr = float(alt_objects[0].correlationCoefficient)
-
-        margin = None
-        if correlation is not None and second_corr is not None:
-            margin = float(correlation) - second_corr
-
-        # Keep the existing 0..1 "confidence" field for front-end compatibility,
-        # but make it meaningful: combine fit strength and separation from runner-up.
-        # Correlations can be negative, so clamp the fit component to 0..1.
-        fit = max(0.0, min(1.0, float(correlation))) if correlation is not None else 0.0
-        separation = max(0.0, min(1.0, (margin or 0.0) * 2.0))
-        confidence = 0.75 * fit + 0.25 * separation
-
+        
+        alternates = []
+        try:
+            alt_keys = key_analysis.alternateKeys(excerpt)
+            if alt_keys:
+                alternates = [str(k) for k in alt_keys[:3]]
+        except Exception:
+            pass
+        
+        confidence = 0.85
+        try:
+            weights = key_analysis.getWeights(excerpt)
+            if weights:
+                max_weight = max(weights) if isinstance(weights, list) else max(weights.values())
+                confidence = min(max_weight / 10.0, 1.0)
+        except Exception:
+            pass
+        
         return {
-            "key": str(key_result),
+            "key": str(key_result) if key_result else "Unknown",
             "confidence": round(confidence, 2),
-            "correlation": round(float(correlation), 4) if correlation is not None else None,
-            "margin": round(float(margin), 4) if margin is not None else None,
-            "alternates": [str(k) for k in alt_objects[:3]],
-            "alternateDetails": alternate_details,
-            "notes": "Estimated using Krumhansl-Schmuckler; confidence combines correlation and separation from the next-best key",
+            "alternates": alternates,
+            "notes": "Estimated using Krumhansl-Schmuckler algorithm"
         }
     except Exception as e:
         try:
             simple_key = excerpt.analyze('key')
-            correlation = getattr(simple_key, 'correlationCoefficient', None)
-            alternates = list(getattr(simple_key, 'alternateInterpretations', []) or [])[:3]
             return {
                 "key": str(simple_key) if simple_key else "Unknown",
-                "confidence": round(max(0.0, min(1.0, float(correlation))), 2)
-                    if correlation is not None else 0.0,
-                "correlation": round(float(correlation), 4) if correlation is not None else None,
-                "margin": None,
-                "alternates": [str(k) for k in alternates],
-                "alternateDetails": [
-                    {
-                        "key": str(k),
-                        "correlation": round(float(k.correlationCoefficient), 4)
-                            if getattr(k, 'correlationCoefficient', None) is not None else None,
-                    }
-                    for k in alternates
-                ],
-                "notes": "Estimated using music21's default key analysis",
+                "confidence": 0.7,
+                "alternates": [],
+                "notes": "Estimated using simple analysis"
             }
         except Exception:
             return {
                 "key": "Could not determine",
                 "confidence": 0,
-                "correlation": None,
-                "margin": None,
                 "alternates": [],
-                "alternateDetails": [],
-                "error": str(e),
+                "error": str(e)
             }
+
 
 def stream_to_musicxml(stream) -> str:
     """Convert a music21 stream to MusicXML string.
@@ -563,330 +418,238 @@ def workflow_roman_numeral_analysis(score, selection: dict, params: dict) -> dic
 
 
 def workflow_cadence_spotter(score, selection: dict, params: dict) -> dict:
-    """Detect and score cadence candidates using harmony, voicing, meter and closure."""
+    """Detect cadence-like progressions in the selection."""
     from music21 import roman, key as key_module
-
+    
     excerpt = get_selection(score, selection)
-
+    
     try:
         estimated_key = excerpt.analyze('key')
     except Exception:
         estimated_key = key_module.Key('C')
-
+    
     try:
         chordified = excerpt.chordify()
     except Exception:
         return {"error": "Could not chordify the selection", "cadences": []}
-
-    events = []
-    for chord in chordified.recurse().getElementsByClass('Chord'):
-        try:
-            rn = roman.romanNumeralFromChord(chord, estimated_key)
-            events.append((chord, rn))
-        except Exception:
-            continue
-
-    def harmonic_kind(prev_rn, curr_rn):
-        prev_degree = prev_rn.romanNumeralAlone
-        curr_degree = curr_rn.romanNumeralAlone
-        if prev_degree == 'V' and curr_degree in ('I', 'i'):
-            return 'authentic'
-        if prev_degree in ('IV', 'iv') and curr_degree in ('I', 'i'):
-            return 'plagal'
-        if prev_degree == 'V' and curr_degree in ('VI', 'vi'):
-            return 'deceptive'
-        if curr_degree == 'V' and prev_degree in ('I', 'i', 'ii', 'II', 'IV', 'iv'):
-            return 'half'
-        return None
-
+    
+    cadence_patterns = {
+        ("V", "I"): "Perfect Authentic Cadence (PAC)",
+        ("V", "i"): "Perfect Authentic Cadence (minor)",
+        ("V7", "I"): "Perfect Authentic Cadence (V7-I)",
+        ("V7", "i"): "Perfect Authentic Cadence (V7-i)",
+        ("IV", "I"): "Plagal Cadence (IV-I)",
+        ("iv", "i"): "Plagal Cadence (iv-i)",
+        ("V", "vi"): "Deceptive Cadence (V-vi)",
+        ("V", "VI"): "Deceptive Cadence (V-VI)",
+        ("I", "V"): "Half Cadence (I-V)",
+        ("ii", "V"): "Half Cadence (ii-V)",
+        ("IV", "V"): "Half Cadence (IV-V)",
+    }
+    
     cadences = []
-    for i in range(1, len(events)):
-        prev_chord, prev_rn = events[i - 1]
-        chord, rn = events[i]
-        kind = harmonic_kind(prev_rn, rn)
-        if kind is None:
+    prev_numeral = None
+    prev_measure = None
+    
+    start_m = selection.get("startMeasure", 1)
+    end_m = selection.get("endMeasure", start_m + 10)
+    
+    for measure_num in range(start_m, end_m + 1):
+        try:
+            measure = chordified.measure(measure_num)
+            if measure is None:
+                continue
+            
+            for chord in measure.recurse().getElementsByClass('Chord'):
+                try:
+                    rn = roman.romanNumeralFromChord(chord, estimated_key)
+                    current = rn.romanNumeralAlone
+                    
+                    if prev_numeral:
+                        pattern = (prev_numeral, current)
+                        if pattern in cadence_patterns:
+                            cadences.append({
+                                "measure": measure_num,
+                                "type": cadence_patterns[pattern],
+                                "progression": f"{prev_numeral} → {current}",
+                                "prevMeasure": prev_measure,
+                            })
+                    
+                    prev_numeral = current
+                    prev_measure = measure_num
+                except Exception:
+                    continue
+                    
+        except Exception:
             continue
-
-        evidence = []
-        score_value = 0.40  # required harmonic progression
-        evidence.append('cadential harmonic progression')
-
-        prev_root = False
-        curr_root = False
-        try:
-            prev_root = prev_rn.inversion() == 0
-            curr_root = rn.inversion() == 0
-        except Exception:
-            pass
-        if prev_root:
-            score_value += 0.08
-            evidence.append('first chord in root position')
-        if curr_root:
-            score_value += 0.08
-            evidence.append('arrival chord in root position')
-
-        soprano_tonic = False
-        if kind == 'authentic':
-            try:
-                highest = max(chord.pitches, key=lambda p: p.midi)
-                soprano_tonic = highest.pitchClass == estimated_key.tonic.pitchClass
-            except Exception:
-                soprano_tonic = False
-            if soprano_tonic:
-                score_value += 0.14
-                evidence.append('highest sounding pitch is tonic')
-
-        try:
-            beat_strength = float(chord.beatStrength)
-        except Exception:
-            beat_strength = 0.0
-        if beat_strength >= 0.5:
-            score_value += 0.10
-            evidence.append('metrically strong arrival')
-        elif beat_strength >= 0.25:
-            score_value += 0.05
-            evidence.append('moderately strong arrival')
-
-        try:
-            duration = float(chord.quarterLength)
-        except Exception:
-            duration = 0.0
-        if duration >= 1.0:
-            score_value += 0.08
-            evidence.append('sustained arrival')
-
-        is_terminal_or_gap = i == len(events) - 1
-        if not is_terminal_or_gap:
-            try:
-                curr_end = float(chord.getOffsetInHierarchy(chordified)) + duration
-                next_offset = float(events[i + 1][0].getOffsetInHierarchy(chordified))
-                is_terminal_or_gap = next_offset - curr_end > 0.05
-            except Exception:
-                pass
-        if is_terminal_or_gap:
-            score_value += 0.12
-            evidence.append('phrase-like temporal closure')
-
-        score_value = min(1.0, score_value)
-
-        if kind == 'authentic':
-            if prev_root and curr_root and soprano_tonic:
-                label = 'Perfect Authentic Cadence candidate'
-            else:
-                label = 'Authentic Cadence candidate'
-        elif kind == 'plagal':
-            label = 'Plagal Cadence candidate'
-        elif kind == 'deceptive':
-            label = 'Deceptive Cadence candidate'
-        else:
-            label = 'Half Cadence candidate'
-
-        measure_num = getattr(chord, 'measureNumber', None) or selection.get('startMeasure', 1)
-        prev_measure = getattr(prev_chord, 'measureNumber', None) or measure_num
-        try:
-            offset_ql = float(chord.offset)
-        except Exception:
-            offset_ql = 0.0
-
-        cadences.append({
-            "measure": measure_num,
-            "type": label,
-            "progression": f"{prev_rn.figure} → {rn.figure}",
-            "prevMeasure": prev_measure,
-            "confidence": round(score_value, 2),
-            "evidence": evidence,
-            "offsetQL": offset_ql,
-        })
-
+    
     annotations = []
     for cad in cadences:
         annotations.append({
             "type": "marker",
             "measure": cad["measure"],
-            "offsetQL": cad.get("offsetQL", 0.0),
+            "offsetQL": 0.0,
             "part": "ALL",
-            "text": f"{cad['type']} ({int(cad['confidence'] * 100)}%)",
+            "text": cad["type"].split("(")[0].strip(),
             "style": {"category": "cadence"}
         })
-
+    
     return {
         "key": str(estimated_key),
         "cadences": cadences,
         "totalFound": len(cadences),
         "annotations": annotations,
-        "notes": "Cadences are candidates scored from harmonic progression, inversion, voicing, metrical strength, duration, and local closure.",
     }
 
-def workflow_interval_map_between_parts(score, selection: dict, params: dict) -> dict:
-    """Map sounding harmonic intervals between two parts at every vertical change."""
-    from music21 import interval as interval_module
 
+def workflow_interval_map_between_parts(score, selection: dict, params: dict) -> dict:
+    """Map harmonic intervals between two parts."""
+    from music21 import interval as interval_module
+    
     part_a = params.get("partA", "0")
     part_b = params.get("partB", "1")
-
+    
     parts = list(score.parts)
     if len(parts) < 2:
         return {"error": "Score needs at least 2 parts for interval analysis", "intervals": []}
-
+    
     try:
-        part_a_idx = int(part_a) if str(part_a).isdigit() else 0
-        part_b_idx = int(part_b) if str(part_b).isdigit() else 1
+        part_a_idx = int(part_a) if part_a.isdigit() else 0
+        part_b_idx = int(part_b) if part_b.isdigit() else 1
     except Exception:
         part_a_idx, part_b_idx = 0, 1
-
+    
     if part_a_idx >= len(parts):
         part_a_idx = 0
     if part_b_idx >= len(parts):
         part_b_idx = min(1, len(parts) - 1)
-
+    
     start_m = selection.get("startMeasure", 1)
     end_m = selection.get("endMeasure", start_m + 10)
-    excerpt_a, excerpt_b = _get_two_part_excerpts(
-        score, part_a_idx, part_b_idx, start_m, end_m
-    )
-
-    events_a = _extract_timed_pitch_events(excerpt_a)
-    events_b = _extract_timed_pitch_events(excerpt_b)
-    offsets = _vertical_change_offsets(events_a, events_b)
-
+    
+    try:
+        excerpt_a = parts[part_a_idx].measures(start_m, end_m)
+        excerpt_b = parts[part_b_idx].measures(start_m, end_m)
+    except Exception:
+        excerpt_a = parts[part_a_idx]
+        excerpt_b = parts[part_b_idx]
+    
     intervals_data = []
     interval_counts = Counter()
-    seen = set()
-
-    # Analyse each stable vertical slice.  End-only final offsets contain no
-    # sounding event, so they naturally produce no interval.
-    for t in offsets:
-        pitches_a = _active_pitches_at(events_a, t)
-        pitches_b = _active_pitches_at(events_b, t)
-        if not pitches_a or not pitches_b:
+    
+    notes_a = list(excerpt_a.recurse().notes)
+    notes_b = list(excerpt_b.recurse().notes)
+    
+    for note_a in notes_a:
+        if not hasattr(note_a, 'pitch'):
             continue
-
-        measure_num, beat, local_offset = _measure_and_beat_from_offset(
-            excerpt_a, t, start_m
-        )
-
-        for pitch_a in pitches_a:
-            for pitch_b in pitches_b:
+        offset_a = note_a.offset + (note_a.measureNumber - start_m) * 4 if hasattr(note_a, 'measureNumber') else note_a.offset
+        
+        for note_b in notes_b:
+            if not hasattr(note_b, 'pitch'):
+                continue
+            offset_b = note_b.offset + (note_b.measureNumber - start_m) * 4 if hasattr(note_b, 'measureNumber') else note_b.offset
+            
+            if abs(offset_a - offset_b) < 0.1:
                 try:
-                    ivl = interval_module.Interval(pitch_b, pitch_a)
+                    ivl = interval_module.Interval(note_b.pitch, note_a.pitch)
                     ivl_name = ivl.simpleName
-                    key = (round(t, 7), pitch_a.nameWithOctave, pitch_b.nameWithOctave, ivl_name)
-                    if key in seen:
-                        continue
-                    seen.add(key)
                     interval_counts[ivl_name] += 1
+                    
+                    measure_num = note_a.measureNumber if hasattr(note_a, 'measureNumber') else start_m
+                    beat = float(note_a.beat) if hasattr(note_a, 'beat') and note_a.beat else 1.0
+                    
                     intervals_data.append({
                         "measure": measure_num,
-                        "beat": round(beat, 3),
+                        "beat": beat,
                         "interval": ivl_name,
-                        "pitchA": str(pitch_a.nameWithOctave),
-                        "pitchB": str(pitch_b.nameWithOctave),
-                        "offsetQL": round(local_offset, 6),
-                        "globalOffsetQL": round(float(t), 6),
+                        "pitchA": str(note_a.pitch.nameWithOctave),
+                        "pitchB": str(note_b.pitch.nameWithOctave),
                     })
                 except Exception:
                     continue
-
+    
     part_names = get_score_parts(score)
-
+    
     return {
         "partA": part_names[part_a_idx] if part_a_idx < len(part_names) else f"Part {part_a_idx + 1}",
         "partB": part_names[part_b_idx] if part_b_idx < len(part_names) else f"Part {part_b_idx + 1}",
         "intervals": intervals_data[:100],
         "summary": dict(interval_counts.most_common(10)),
         "totalIntervals": len(intervals_data),
-        "notes": "Intervals are calculated from pitches actually sounding at each vertical change, not by matching note indices or assuming 4/4.",
     }
 
-def workflow_parallel_5ths_8ves_detector(score, selection: dict, params: dict) -> dict:
-    """Detect parallel fifths/octaves using synchronized sounding notes and music21 voice-leading."""
-    from music21 import voiceLeading, note as note_module
 
+def workflow_parallel_5ths_8ves_detector(score, selection: dict, params: dict) -> dict:
+    """Detect parallel fifths and octaves between two parts."""
+    from music21 import interval as interval_module
+    
     part_a = params.get("partA", "0")
     part_b = params.get("partB", "1")
-
+    
     parts = list(score.parts)
     if len(parts) < 2:
         return {"error": "Score needs at least 2 parts", "parallels": []}
-
+    
     try:
-        part_a_idx = int(part_a) if str(part_a).isdigit() else 0
-        part_b_idx = int(part_b) if str(part_b).isdigit() else 1
+        part_a_idx = int(part_a) if part_a.isdigit() else 0
+        part_b_idx = int(part_b) if part_b.isdigit() else 1
     except Exception:
         part_a_idx, part_b_idx = 0, 1
-
-    if part_a_idx >= len(parts):
-        part_a_idx = 0
-    if part_b_idx >= len(parts):
-        part_b_idx = min(1, len(parts) - 1)
-
+    
     start_m = selection.get("startMeasure", 1)
     end_m = selection.get("endMeasure", start_m + 10)
-    excerpt_a, excerpt_b = _get_two_part_excerpts(
-        score, part_a_idx, part_b_idx, start_m, end_m
-    )
-
-    events_a = _extract_timed_pitch_events(excerpt_a)
-    events_b = _extract_timed_pitch_events(excerpt_b)
-    offsets = _vertical_change_offsets(events_a, events_b)
-
-    # A VoiceLeadingQuartet requires one pitch per voice.  Polyphonic moments
-    # inside either selected part are skipped rather than producing false results.
-    verticalities = []
-    for t in offsets:
-        pitches_a = _active_pitches_at(events_a, t)
-        pitches_b = _active_pitches_at(events_b, t)
-        if len(pitches_a) != 1 or len(pitches_b) != 1:
-            continue
-        verticalities.append((t, pitches_a[0], pitches_b[0]))
-
+    
+    try:
+        excerpt_a = parts[part_a_idx].measures(start_m, end_m)
+        excerpt_b = parts[part_b_idx].measures(start_m, end_m)
+    except Exception:
+        excerpt_a = parts[part_a_idx]
+        excerpt_b = parts[part_b_idx]
+    
+    notes_a = [n for n in excerpt_a.recurse().notes if hasattr(n, 'pitch')]
+    notes_b = [n for n in excerpt_b.recurse().notes if hasattr(n, 'pitch')]
+    
     parallels = []
-    for i in range(1, len(verticalities)):
-        t1, a1, b1 = verticalities[i - 1]
-        t2, a2, b2 = verticalities[i]
-
-        # Ignore adjacent segmentation points where neither pitch changed.
-        if a1.midi == a2.midi and b1.midi == b2.midi:
-            continue
-
+    prev_interval = None
+    prev_notes = None
+    
+    for i, note_a in enumerate(notes_a):
+        if i >= len(notes_b):
+            break
+        note_b = notes_b[i]
+        
         try:
-            # Put the higher sounding line first where possible; this is the
-            # convention expected by some VoiceLeadingQuartet methods.
-            if a1.midi >= b1.midi:
-                upper1, upper2, lower1, lower2 = a1, a2, b1, b2
-            else:
-                upper1, upper2, lower1, lower2 = b1, b2, a1, a2
-
-            vlq = voiceLeading.VoiceLeadingQuartet(
-                note_module.Note(upper1), note_module.Note(upper2),
-                note_module.Note(lower1), note_module.Note(lower2)
-            )
-
-            is_fifth = bool(vlq.parallelFifth())
-            is_octave = bool(vlq.parallelOctave())
-            if not (is_fifth or is_octave):
-                continue
-
-            measure_num, beat, local_offset = _measure_and_beat_from_offset(
-                excerpt_a, t2, start_m
-            )
-            motion_type = str(vlq.motionType(allowAntiParallel=True))
-            parallels.append({
-                "type": "Parallel Fifth" if is_fifth else "Parallel Octave",
-                "measure": measure_num,
-                "beat": round(beat, 3),
-                "offsetQL": round(local_offset, 6),
-                "pitchA1": str(a1.nameWithOctave),
-                "pitchB1": str(b1.nameWithOctave),
-                "pitchA2": str(a2.nameWithOctave),
-                "pitchB2": str(b2.nameWithOctave),
-                "motionType": motion_type,
-            })
+            ivl = interval_module.Interval(note_b.pitch, note_a.pitch)
+            simple_ivl = ivl.generic.simpleDirected
+            
+            if prev_interval is not None:
+                if simple_ivl == 5 and prev_interval == 5:
+                    parallels.append({
+                        "type": "Parallel Fifth",
+                        "measure": note_a.measureNumber if hasattr(note_a, 'measureNumber') else start_m,
+                        "pitchA1": str(prev_notes[0].pitch.nameWithOctave),
+                        "pitchB1": str(prev_notes[1].pitch.nameWithOctave),
+                        "pitchA2": str(note_a.pitch.nameWithOctave),
+                        "pitchB2": str(note_b.pitch.nameWithOctave),
+                    })
+                elif simple_ivl == 1 and prev_interval == 1:
+                    parallels.append({
+                        "type": "Parallel Octave",
+                        "measure": note_a.measureNumber if hasattr(note_a, 'measureNumber') else start_m,
+                        "pitchA1": str(prev_notes[0].pitch.nameWithOctave),
+                        "pitchB1": str(prev_notes[1].pitch.nameWithOctave),
+                        "pitchA2": str(note_a.pitch.nameWithOctave),
+                        "pitchB2": str(note_b.pitch.nameWithOctave),
+                    })
+            
+            prev_interval = simple_ivl
+            prev_notes = (note_a, note_b)
         except Exception:
             continue
-
+    
     part_names = get_score_parts(score)
-
+    
     return {
         "partA": part_names[part_a_idx] if part_a_idx < len(part_names) else f"Part {part_a_idx + 1}",
         "partB": part_names[part_b_idx] if part_b_idx < len(part_names) else f"Part {part_b_idx + 1}",
@@ -894,8 +657,8 @@ def workflow_parallel_5ths_8ves_detector(score, selection: dict, params: dict) -
         "totalFound": len(parallels),
         "fifthsCount": len([p for p in parallels if "Fifth" in p["type"]]),
         "octavesCount": len([p for p in parallels if "Octave" in p["type"]]),
-        "notes": "Uses synchronized sounding pitches and music21 VoiceLeadingQuartet; polyphonic moments within a selected part are skipped.",
     }
+
 
 def workflow_rhythm_skeleton(score, selection: dict, params: dict) -> dict:
     """Extract rhythm skeleton (onset times) for each part."""
@@ -1050,94 +813,76 @@ def workflow_motif_finder_interval_contour(score, selection: dict, params: dict)
 
 
 def workflow_reduction_outer_voices(score, selection: dict, params: dict) -> dict:
-    """Create and export an actual outer-voices reduction (highest + lowest pitches)."""
-    from music21 import stream, chord as chord_module, note as note_module
-    import copy
-
+    """Create a reduction with only outer voices (soprano + bass)."""
+    from music21 import stream, note, chord as chord_module
+    
     excerpt = get_selection(score, selection)
-
+    
     try:
         chordified = excerpt.chordify()
     except Exception:
         chordified = excerpt
-
+    
     reduction_stream = stream.Part()
-    reduction_stream.partName = "Outer Voices Reduction"
     playback_events = []
-
+    
     start_m = selection.get("startMeasure", 1)
     end_m = selection.get("endMeasure", start_m + 10)
-
+    
     soprano_part = "Highest voice"
     bass_part = "Lowest voice"
-
+    
     beats_per_measure = 4
     try:
-        ts_first = excerpt.recurse().getElementsByClass('TimeSignature').first()
-        if ts_first is not None:
-            beats_per_measure = float(ts_first.beatCount)
+        for ts in excerpt.recurse().getElementsByClass('TimeSignature'):
+            beats_per_measure = ts.numerator
+            break
     except Exception:
         pass
-
+    
     for measure_num in range(start_m, end_m + 1):
         try:
-            source_measure = chordified.measure(measure_num)
-            if source_measure is None:
+            measure = chordified.measure(measure_num)
+            if measure is None:
                 continue
-
-            out_measure = stream.Measure(number=measure_num)
-
-            # Preserve local notation context needed for a self-contained export.
-            for class_name in ('TimeSignature', 'KeySignature', 'Clef'):
-                try:
-                    for ctx in source_measure.getElementsByClass(class_name):
-                        out_measure.insert(float(ctx.offset), copy.deepcopy(ctx))
-                except Exception:
-                    pass
-
-            for element in source_measure.recurse().getElementsByClass('Chord'):
-                if not element.pitches:
-                    continue
-
-                sorted_pitches = sorted(element.pitches, key=lambda p: p.midi)
-                bass_pitch = sorted_pitches[0]
-                soprano_pitch = sorted_pitches[-1]
-                beat = float(element.beat) if getattr(element, 'beat', None) else 1.0
-                duration = float(element.quarterLength) if element.quarterLength else 1.0
-                offset_ql = float(element.offset)
-
-                if bass_pitch.midi == soprano_pitch.midi:
-                    reduced_event = note_module.Note(copy.deepcopy(bass_pitch))
-                    reduced_event.quarterLength = duration
-                    frequencies = [round(bass_pitch.frequency, 2)]
-                    label = str(bass_pitch.nameWithOctave)
-                else:
-                    reduced_event = chord_module.Chord([
-                        copy.deepcopy(bass_pitch), copy.deepcopy(soprano_pitch)
-                    ])
-                    reduced_event.quarterLength = duration
-                    frequencies = [
-                        round(bass_pitch.frequency, 2),
-                        round(soprano_pitch.frequency, 2),
-                    ]
-                    label = f"{bass_pitch.nameWithOctave} + {soprano_pitch.nameWithOctave}"
-
-                out_measure.insert(offset_ql, reduced_event)
-                playback_events.append({
-                    "measure": measure_num,
-                    "beat": beat,
-                    "duration": duration,
-                    "frequencies": frequencies,
-                    "chordLabel": label,
-                    "offsetQL": offset_ql,
-                })
-
-            reduction_stream.append(out_measure)
+            
+            for element in measure.recurse().getElementsByClass('Chord'):
+                if len(element.pitches) >= 2:
+                    sorted_pitches = sorted(element.pitches, key=lambda p: p.midi)
+                    bass_pitch = sorted_pitches[0]
+                    soprano_pitch = sorted_pitches[-1]
+                    
+                    bass_freq = bass_pitch.frequency
+                    soprano_freq = soprano_pitch.frequency
+                    
+                    beat = float(element.beat) if hasattr(element, 'beat') and element.beat else 1.0
+                    duration = float(element.quarterLength) if element.quarterLength else 1.0
+                    
+                    playback_events.append({
+                        "measure": measure_num,
+                        "beat": beat,
+                        "duration": duration,
+                        "frequencies": [round(bass_freq, 2), round(soprano_freq, 2)],
+                        "chordLabel": f"{bass_pitch.nameWithOctave} + {soprano_pitch.nameWithOctave}"
+                    })
+                elif len(element.pitches) == 1:
+                    pitch = element.pitches[0]
+                    beat = float(element.beat) if hasattr(element, 'beat') and element.beat else 1.0
+                    duration = float(element.quarterLength) if element.quarterLength else 1.0
+                    
+                    playback_events.append({
+                        "measure": measure_num,
+                        "beat": beat,
+                        "duration": duration,
+                        "frequencies": [round(pitch.frequency, 2)],
+                        "chordLabel": str(pitch.nameWithOctave)
+                    })
+                    
         except Exception:
             continue
-
-    notation_xml = stream_to_musicxml(reduction_stream)
-
+    
+    notation_xml = stream_to_musicxml(chordified)
+    
     return {
         "type": "transform",
         "soprano": soprano_part,
@@ -1146,10 +891,11 @@ def workflow_reduction_outer_voices(score, selection: dict, params: dict) -> dic
         "playbackEvents": playback_events,
         "beatsPerMeasure": beats_per_measure,
         "defaultTempo": 120,
-        "description": "Outer voices reduction (highest + lowest sounding pitches at each chord change)",
+        "description": "Outer voices reduction (highest + lowest pitches at each chord change)",
         "exports": {"formats": ["musicxml", "midi"]},
         "notationData": notation_xml if notation_xml else None,
     }
+
 
 def workflow_spectral_analysis(score, selection: dict, params: dict) -> dict:
     """Compute spectral descriptors for each event-change verticality."""
@@ -1240,168 +986,6 @@ def workflow_spectral_analysis(score, selection: dict, params: dict) -> dict:
     }
 
 
-def _guess_instrument_name(part, index: int) -> str:
-    """Best-effort instrument name for sample/soundfont selection on the client.
-
-    Falls back through music21's instrument detection and finally the part name,
-    since many hand-authored MusicXML files only set <part-name> without a proper
-    <score-instrument>.
-    """
-    try:
-        inst = part.getInstrument(returnDefault=False)
-        if inst is not None and inst.instrumentName:
-            return str(inst.instrumentName)
-    except Exception:
-        pass
-    try:
-        if part.partName:
-            return str(part.partName)
-    except Exception:
-        pass
-    return f"Part {index + 1}"
-
-
-def build_playback_score(score, start_measure: int, end_measure: int) -> dict:
-    """Extract a full, note-accurate playback representation of the score.
-
-    Every sounding note (across all parts) is emitted with its offset and duration
-    in quarter lengths plus an exact pitch expressed as a floating point MIDI
-    number (music21's ``Pitch.ps``), which already folds in fractional accidental
-    alterations (e.g. quarter-tones) and any explicit microtone/cent deviation.
-    Tempo and time signature are exported as change maps (rather than baked into
-    absolute seconds) so the client can build one shared time conversion used for
-    both note scheduling and the metronome, keeping them perfectly in sync.
-    """
-    try:
-        excerpt = score.measures(start_measure, end_measure)
-    except Exception:
-        excerpt = score
-
-    parts_out = []
-    for i, part in enumerate(excerpt.parts if hasattr(excerpt, "parts") else [excerpt]):
-        try:
-            part_name = str(part.partName) if part.partName else f"Part {i + 1}"
-        except Exception:
-            part_name = f"Part {i + 1}"
-
-        instrument_name = _guess_instrument_name(part, i)
-
-        notes_out = []
-        try:
-            flat = part.flatten().stripTies(retainContainers=False)
-        except Exception:
-            try:
-                flat = part.flatten()
-            except Exception:
-                flat = part
-
-        try:
-            elements = flat.notes
-        except Exception:
-            elements = []
-
-        for element in elements:
-            try:
-                onset_ql = float(element.offset)
-                duration_ql = float(element.quarterLength)
-            except Exception:
-                continue
-            if duration_ql <= 0:
-                continue
-
-            pitches = []
-            if hasattr(element, "pitch"):
-                pitches = [element.pitch]
-            elif hasattr(element, "pitches"):
-                pitches = list(element.pitches)
-            if not pitches:
-                continue
-
-            try:
-                velocity = float(element.volume.velocity) if element.volume.velocity else 90.0
-            except Exception:
-                velocity = 90.0
-
-            measure_num = None
-            try:
-                measure_num = element.measureNumber
-            except Exception:
-                pass
-
-            for p in pitches:
-                try:
-                    midi_float = float(p.ps)
-                except Exception:
-                    continue
-                notes_out.append({
-                    "onsetQL": onset_ql,
-                    "durationQL": duration_ql,
-                    "midi": midi_float,
-                    "velocity": velocity,
-                    "measure": measure_num,
-                })
-
-        parts_out.append({
-            "id": str(i),
-            "name": part_name,
-            "instrument": instrument_name,
-            "notes": notes_out,
-        })
-
-    tempo_map = []
-    try:
-        for boundary_start, _boundary_end, mm in score.metronomeMarkBoundaries():
-            bpm = mm.getQuarterBPM() if mm is not None else None
-            tempo_map.append({
-                "offsetQL": float(boundary_start),
-                "bpm": float(bpm) if bpm else 120.0,
-            })
-    except Exception:
-        pass
-    if not tempo_map:
-        tempo_map = [{"offsetQL": 0.0, "bpm": 120.0}]
-    tempo_map.sort(key=lambda e: e["offsetQL"])
-
-    ts_map = []
-    seen_ts_offsets = set()
-    try:
-        for ts in score.flatten().getElementsByClass('TimeSignature'):
-            offset_key = round(float(ts.offset), 6)
-            if offset_key in seen_ts_offsets:
-                continue
-            seen_ts_offsets.add(offset_key)
-            try:
-                beat_count = int(ts.beatCount)
-                beat_duration_ql = float(ts.beatDuration.quarterLength)
-            except Exception:
-                beat_count = ts.numerator
-                beat_duration_ql = 4.0 / ts.denominator
-            ts_map.append({
-                "offsetQL": float(ts.offset),
-                "numerator": int(ts.numerator),
-                "denominator": int(ts.denominator),
-                "beatCount": beat_count,
-                "beatDurationQL": beat_duration_ql,
-            })
-    except Exception:
-        pass
-    if not ts_map:
-        ts_map = [{"offsetQL": 0.0, "numerator": 4, "denominator": 4, "beatCount": 4, "beatDurationQL": 1.0}]
-    ts_map.sort(key=lambda e: e["offsetQL"])
-
-    try:
-        duration_ql = float(excerpt.flatten().highestTime)
-    except Exception:
-        duration_ql = max((n["onsetQL"] + n["durationQL"]) for p in parts_out for n in p["notes"]) if any(p["notes"] for p in parts_out) else 0.0
-
-    return {
-        "durationQL": duration_ql,
-        "parts": parts_out,
-        "tempoMap": tempo_map,
-        "timeSignatureMap": ts_map,
-    }
-
-
 WORKFLOW_REGISTRY = {
     "score_summary": {
         "id": "score_summary",
@@ -1438,7 +1022,7 @@ WORKFLOW_REGISTRY = {
     "cadence_spotter": {
         "id": "cadence_spotter",
         "name": "Cadence Spotter",
-        "description": "Detect and score cadence candidates from harmony, voicing, meter, and closure",
+        "description": "Detect cadence-like progressions (PAC, HC, DC, PC)",
         "type": "analysis",
         "params": [],
         "function": workflow_cadence_spotter
@@ -1457,7 +1041,7 @@ WORKFLOW_REGISTRY = {
     "parallel_5ths_8ves_detector": {
         "id": "parallel_5ths_8ves_detector",
         "name": "Parallel 5ths/8ves Detector",
-        "description": "Detect parallel fifths and octaves between synchronized sounding voices",
+        "description": "Detect parallel fifths and octaves between two parts",
         "type": "analysis",
         "params": [
             {"name": "partA", "type": "select", "label": "Part A", "required": True, "default": "0"},
@@ -1649,7 +1233,7 @@ if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description="Music21 Workflow CLI")
-    parser.add_argument("command", choices=["list", "run", "parse", "convert", "export", "playback"])
+    parser.add_argument("command", choices=["list", "run", "parse", "convert", "export"])
     parser.add_argument("--workflow", help="Workflow ID for run command")
     parser.add_argument("--file", help="Path to MusicXML file")
     parser.add_argument("--start", type=int, default=1, help="Start measure")
@@ -1758,21 +1342,5 @@ if __name__ == "__main__":
             format_type = params.get("format", "musicxml")
             result = export_score(score, selection, format_type)
             print(json.dumps(result))
-        except Exception as e:
-            print(json.dumps({"success": False, "error": str(e)}))
-
-    elif args.command == "playback":
-        if args.file:
-            with open(args.file, 'r') as f:
-                musicxml_data = f.read()
-        else:
-            musicxml_data = sys.stdin.read()
-
-        try:
-            score = parse_musicxml(musicxml_data)
-            metadata = get_score_metadata(score)
-            end_measure = args.end if args.end else metadata["measureCount"]
-            result = build_playback_score(score, args.start, end_measure)
-            print(json.dumps({"success": True, **result}))
         except Exception as e:
             print(json.dumps({"success": False, "error": str(e)}))

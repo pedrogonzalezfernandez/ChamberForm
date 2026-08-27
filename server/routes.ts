@@ -356,6 +356,47 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/playback/score", async (req, res) => {
+    try {
+      const { scoreId } = req.body;
+
+      if (!scoreId) {
+        return res.status(400).json({ error: "scoreId is required" });
+      }
+
+      const score = await storage.getScore(scoreId);
+      if (!score) {
+        return res.status(404).json({ error: "Score not found" });
+      }
+
+      const { stdout } = await runPythonWorkflow(
+        "playback",
+        ["--start", "1", "--end", String(score.metadata.measureCount)],
+        score.musicXmlData
+      );
+
+      const result = JSON.parse(stdout);
+
+      if (!result.success) {
+        return res.status(400).json({ error: result.error || "Failed to build playback score" });
+      }
+
+      return res.json({
+        scoreId,
+        durationQL: result.durationQL,
+        parts: result.parts,
+        tempoMap: result.tempoMap,
+        timeSignatureMap: result.timeSignatureMap,
+      });
+    } catch (error) {
+      console.error("Playback score error:", error);
+      return res.status(500).json({
+        error: "Failed to build playback score",
+        details: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
   app.post("/api/pipeline/export", async (req, res) => {
     try {
       const { scoreId, stepId, format, selection } = req.body;

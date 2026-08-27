@@ -156,6 +156,52 @@ export const reductionDataSchema = z.object({
 
 export type ReductionData = z.infer<typeof reductionDataSchema>;
 
+export const playbackNoteSchema = z.object({
+  onsetQL: z.number(),
+  durationQL: z.number(),
+  midi: z.number(),
+  velocity: z.number(),
+  measure: z.number().nullable().optional(),
+});
+
+export type PlaybackNote = z.infer<typeof playbackNoteSchema>;
+
+export const playbackPartSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  instrument: z.string(),
+  notes: z.array(playbackNoteSchema),
+});
+
+export type PlaybackPart = z.infer<typeof playbackPartSchema>;
+
+export const tempoEventSchema = z.object({
+  offsetQL: z.number(),
+  bpm: z.number(),
+});
+
+export type TempoEvent = z.infer<typeof tempoEventSchema>;
+
+export const timeSignatureEventSchema = z.object({
+  offsetQL: z.number(),
+  numerator: z.number(),
+  denominator: z.number(),
+  beatCount: z.number(),
+  beatDurationQL: z.number(),
+});
+
+export type TimeSignatureEvent = z.infer<typeof timeSignatureEventSchema>;
+
+export const playbackScoreSchema = z.object({
+  scoreId: z.string(),
+  durationQL: z.number(),
+  parts: z.array(playbackPartSchema),
+  tempoMap: z.array(tempoEventSchema),
+  timeSignatureMap: z.array(timeSignatureEventSchema),
+});
+
+export type PlaybackScore = z.infer<typeof playbackScoreSchema>;
+
 export const errorResponseSchema = z.object({
   error: z.string(),
   details: z.string().optional(),
